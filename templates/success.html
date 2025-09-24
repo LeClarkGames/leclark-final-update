@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verification Complete</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;700&display=swap');
+
+        /* --- NEW: Animated Nebula Background --- */
+        @keyframes move-nebula {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+
+        @keyframes move-stars {
+            from { transform: translateY(0px); }
+            to   { transform: translateY(-2000px); }
+        }
+        
+        body {
+            /* This is the new background. It layers multiple gradients to create the nebula. */
+            background-color: #00000a;
+            background-image: 
+                radial-gradient(ellipse at 70% 20%, rgba(100, 120, 255, 0.25) 0%, rgba(0,0,0,0) 50%),
+                radial-gradient(ellipse at 30% 80%, rgba(255, 120, 180, 0.25) 0%, rgba(0,0,0,0) 50%),
+                linear-gradient(125deg, #0d0221 0%, #00000a 100%);
+            background-size: 200% 200%;
+            animation: move-nebula 25s ease infinite;
+
+            font-family: 'Poppins', sans-serif;
+            color: #fff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+        }
+
+        /* The starfield layers now sit on top of the nebula */
+        .stars {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+        }
+        
+        .stars-inner {
+            width: 2000px;
+            height: 2000px;
+            background: transparent;
+            box-shadow: 
+                684px 1645px #FFF, 1269px 1313px #FFF, 153px 145px #FFF, 
+                1194px 799px #FFF, 1399px 1563px #FFF, 1314px 214px #FFF, 
+                578px 1888px #FFF, 1690px 424px #FFF, 1112px 1318px #FFF, 
+                156px 1314px #FFF, 151px 110px #FFF, 1146px 1043px #FFF, 
+                1843px 1869px #FFF, 249px 133px #FFF, 1198px 1121px #FFF, 
+                1984px 901px #FFF, 917px 929px #FFF, 882px 843px #FFF, 
+                108px 233px #FFF, 1372px 1192px #FFF, 1429px 1968px #FFF, 
+                106px 1438px #FFF, 1559px 1893px #FFF, 1341px 1012px #FFF, 
+                507px 1138px #FFF, 1500px 1041px #FFF, 35px 1232px #FFF;
+            animation: move-stars 200s linear infinite;
+        }
+
+        .stars-inner.s2 {
+            width: 1000px; height: 1000px;
+            box-shadow: 236px 871px #FFF, 715px 18px #FFF, 796px 379px #FFF, 897px 499px #FFF, 814px 404px #FFF, 259px 381px #FFF;
+            animation-duration: 100s;
+        }
+
+        .stars-inner.s3 {
+            width: 500px; height: 500px;
+            box-shadow: 237px 409px #FFF, 124px 174px #FFF, 32px 343px #FFF, 426px 410px #FFF, 15px 479px #FFF;
+            animation-duration: 50s;
+        }
+        
+        .verification-card {
+            background: rgba(18, 18, 28, 0.75);
+            backdrop-filter: blur(15px);
+            border-radius: 15px;
+            padding: 40px;
+            text-align: center;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+            width: 90%;
+            max-width: 480px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            position: relative;
+            z-index: 10;
+            animation: float 6s ease-in-out infinite;
+        }
+        
+        @keyframes float {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-10px); }
+        }
+
+        .text-gradient {
+            background: linear-gradient(90deg, #ff3f3f, #3f79ff, #ff3f3f);
+            background-size: 200% auto;
+            color: #fff;
+            background-clip: text;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            animation: textflow 3s linear infinite;
+        }
+
+        @keyframes textflow {
+            to { background-position: 200% center; }
+        }
+
+        h1 {
+            font-size: 32px;
+            font-weight: 700;
+            margin: 0 0 15px 0;
+        }
+
+        .bot-avatar {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            margin: 20px auto;
+        }
+
+        p {
+            font-size: 18px;
+            line-height: 1.6;
+            color: #c0c0c0;
+        }
+
+        strong {
+            font-weight: 700;
+            color: #fff;
+        }
+
+        .footer {
+            position: absolute;
+            bottom: 20px;
+            width: 100%;
+            text-align: center;
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.3);
+            z-index: 10;
+        }
+
+    </style>
+</head>
+<body>
+    <div class="stars">
+        <div class="stars-inner s1"></div>
+        <div class="stars-inner s2"></div>
+        <div class="stars-inner s3"></div>
+    </div>
+
+    <div class="verification-card">
+        <img src="{{ bot_avatar_url }}" alt="Bot Avatar" class="bot-avatar">
+        <h1><span class="text-gradient">Verification Complete</span></h1>
+        <p>Your identity as <strong>{{ account_name }}</strong> has been confirmed.</p>
+        <p>Access to the <strong>{{ server_name }}</strong> network is now granted.</p>
+    </div>
+
+    <div class="footer">
+        Powered by Le Clark Games
+    </div>
+</body>
+</html>

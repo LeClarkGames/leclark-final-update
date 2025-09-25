@@ -1,0 +1,184 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap');
+
+/* --- Animated Nebula Background --- */
+@keyframes move-nebula {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+}
+
+body {
+    background-color: #00000a;
+    background-image:
+        radial-gradient(ellipse at 70% 20%, rgba(100, 120, 255, 0.25) 0%, rgba(0,0,0,0) 50%),
+        radial-gradient(ellipse at 30% 80%, rgba(255, 120, 180, 0.25) 0%, rgba(0,0,0,0) 50%),
+        linear-gradient(125deg, #0d0221 0%, #00000a 100%);
+    background-size: 200% 200%;
+    animation: move-nebula 25s ease infinite;
+    font-family: 'Poppins', sans-serif;
+    color: #fff;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    margin: 0;
+    padding: 2rem;
+    box-sizing: border-box;
+}
+
+.container {
+    width: 100%;
+    max-width: 800px;
+    z-index: 10;
+}
+
+.card {
+    background: rgba(18, 18, 28, 0.75);
+    backdrop-filter: blur(15px);
+    -webkit-backdrop-filter: blur(15px);
+    border-radius: 15px;
+    padding: 30px 40px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    text-align: center;
+}
+
+.header {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    margin-bottom: 2rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    padding-bottom: 20px;
+    text-align: left;
+}
+
+.guild-icon {
+    width: 70px;
+    height: 70px;
+    border-radius: 50%;
+}
+
+h1 {
+    margin: 0;
+    font-size: 1.8rem;
+    font-weight: 700;
+}
+
+h3 {
+    margin-top: 0;
+    border-bottom: 1px solid #5865F2;
+    padding-bottom: 10px;
+}
+
+.subtitle, p {
+    font-size: 1.1rem;
+    color: #c0c0c0;
+    margin: 0.5rem 0 0 0;
+}
+
+/* --- Leaderboard Specific --- */
+.entry {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    padding: 15px 10px;
+    border-radius: 8px;
+    transition: background-color 0.2s ease-in-out;
+}
+.entry:not(:last-child) {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+.entry:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+.rank {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #c0c0c0;
+    width: 40px;
+    text-align: center;
+}
+.entry.rank-1 .rank { color: #ffd700; }
+.entry.rank-2 .rank { color: #c0c0c0; }
+.entry.rank-3 .rank { color: #cd7f32; }
+.user-avatar {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+}
+.user-info { flex-grow: 1; text-align: left; }
+.user-info .name {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin: 0;
+}
+.user-info .details {
+    font-size: 0.9rem;
+    color: #8b949e;
+    margin: 0;
+}
+.score {
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: #58a6ff;
+    min-width: 100px;
+    text-align: right;
+}
+.user-info .name .emoji {
+    margin-right: 5px;
+}
+
+/* --- Dashboard & User Activity --- */
+.stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 30px;
+    text-align: left;
+}
+.stat-item {
+    background: rgba(0,0,0,0.2);
+    padding: 15px;
+    border-radius: 8px;
+}
+.stat-label {
+    font-size: 14px;
+    color: #adb5bd;
+    text-transform: uppercase;
+}
+.stat-value {
+    font-size: 28px;
+    font-weight: 700;
+}
+.search-bar { display: flex; margin-bottom: 2rem; }
+#userSearch {
+    flex-grow: 1; padding: 12px; font-size: 16px; border-radius: 8px 0 0 8px;
+    border: 1px solid #5865F2; background: rgba(0,0,0,0.2); color: #fff;
+}
+#userSearchBtn {
+    padding: 12px 20px; font-size: 16px; border-radius: 0 8px 8px 0;
+    border: none; background: #5865F2; color: #fff; cursor: pointer;
+}
+.stat-list { list-style: none; padding: 0; }
+.stat-list li { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #2a2a33; }
+.stat-list li:last-child { border-bottom: none; }
+.stat-list span { font-weight: 600; }
+#userInfoCard { display: none; }
+
+/* --- Buttons and Forms --- */
+button, .button {
+    width: 100%;
+    padding: 15px;
+    border: none;
+    font-size: 18px;
+    font-weight: 700;
+    cursor: pointer;
+    border-radius: 8px;
+    transition: background-color 0.2s;
+    text-decoration: none;
+    display: inline-block;
+    text-align: center;
+}
+.approve-btn { background-color: #57F287; color: #000; }
+.approve-btn:hover { background-color: #4cdb7b; }

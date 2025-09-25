@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ guild_name }} - Activity Dashboard</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap');
+        body {
+            font-family: 'Poppins', sans-serif; background-color: #0d0221; color: #fff;
+            padding: 2rem; margin: 0;
+        }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .header { display: flex; align-items: center; gap: 20px; margin-bottom: 2rem; }
+        .guild-icon { width: 70px; height: 70px; border-radius: 50%; }
+        h1 { margin: 0; }
+        .search-bar { display: flex; margin-bottom: 2rem; }
+        #userSearch {
+            flex-grow: 1; padding: 12px; font-size: 16px; border-radius: 8px 0 0 8px;
+            border: 1px solid #5865F2; background: #1c1c24; color: #fff;
+        }
+        #userSearchBtn {
+            padding: 12px 20px; font-size: 16px; border-radius: 0 8px 8px 0;
+            border: none; background: #5865F2; color: #fff; cursor: pointer;
+        }
+        .grid-container { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 1.5rem; }
+        .card { background: #1c1c24; border-radius: 10px; padding: 20px; }
+        .card h3 { margin-top: 0; border-bottom: 1px solid #5865F2; padding-bottom: 10px; }
+        .stat-list { list-style: none; padding: 0; }
+        .stat-list li { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #2a2a33; }
+        .stat-list li:last-child { border-bottom: none; }
+        .stat-list span { font-weight: 600; }
+        #userInfoCard { display: none; } /* Initially hidden */
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <img src="{{ guild_icon_url }}" alt="Server Icon" class="guild-icon">
+            <h1>{{ guild_name }} Activity Dashboard</h1>
+        </div>
+
+        <div class="search-bar">
+            <input type="text" id="userSearch" placeholder="Search for a user by Name, Name#Discrim, or ID...">
+            <button id="userSearchBtn">Search</button>
+        </div>
+
+        <div class="grid-container">
+            <div class="card" id="userInfoCard">
+                <h3 id="userInfoHeader">User Information</h3>
+                <div id="userInfoContent"></div>
+            </div>
+
+            <div class="card">
+                <h3>📊 Top 5 Most Active Members (Overall)</h3>
+                <ul class="stat-list">
+                    {% for user in top_users %}
+                    <li>{{ user.name }}<span>{{ user.message_count }} msgs / {{ "%.1f"|format(user.voice_seconds / 3600) }} hrs</span></li>
+                    {% else %}
+                    <li>No activity recorded yet.</li>
+                    {% endfor %}
+                </ul>
+            </div>
+
+            <div class="card">
+                <h3>💬 Top 5 Busiest Text Channels</h3>
+                <ul class="stat-list">
+                    {% for channel in top_text_channels %}
+                    <li>#{{ channel.name }}<span>{{ channel.message_count }} msgs</span></li>
+                    {% else %}
+                    <li>No activity recorded yet.</li>
+                    {% endfor %}
+                </ul>
+            </div>
+            
+            <div class="card">
+                <h3>🔊 Top 5 Most Active Voice Channels</h3>
+                <ul class="stat-list">
+                     {% for channel in top_voice_channels %}
+                    <li>{{ channel.name }}<span>{{ "%.1f"|format(channel.voice_seconds / 3600) }} hrs</span></li>
+                    {% else %}
+                    <li>No activity recorded yet.</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const searchBtn = document.getElementById('userSearchBtn');
+        const searchInput = document.getElementById('userSearch');
+        const userInfoCard = document.getElementById('userInfoCard');
+        const userInfoHeader = document.getElementById('userInfoHeader');
+        const userInfoContent = document.getElementById('userInfoContent');
+
+        const searchUser = async () => {
+            const query = searchInput.value;
+            if (!query) return;
+
+            const response = await fetch(`/api/user_search/{{ guild_id }}?query=${encodeURIComponent(query)}`);
+            const data = await response.json();
+
+            if (data.error) {
+                userInfoHeader.innerText = "Error";
+                userInfoContent.innerHTML = `<p>${data.error}</p>`;
+            } else {
+                userInfoHeader.innerText = `Activity for ${data.name}`;
+                userInfoContent.innerHTML = `
+                    <ul class="stat-list">
+                        <li>Current Tier <span>${data.tier}</span></li>
+                        <li>Total Messages <span>${data.total_messages}</span></li>
+                        <li>Total Voice Hours <span>${(data.total_voice_seconds / 3600).toFixed(2)}</span></li>
+                    </ul>
+                    <h4>Channel Activity:</h4>
+                    <ul class="stat-list">
+                        ${Object.entries(data.channel_activity).map(([channel, stats]) => `
+                            <li>#${channel}
+                                <span>${stats.messages || 0} msgs / ${(stats.voice_seconds / 3600).toFixed(1)} hrs</span>
+                            </li>
+                        `).join('')}
+                    </ul>
+                `;
+            }
+            userInfoCard.style.display = 'block';
+        };
+
+        searchBtn.addEventListener('click', searchUser);
+        searchInput.addEventListener('keyup', (event) => {
+            if (event.key === 'Enter') {
+                searchUser();
+            }
+        });
+    </script>
+</body>
+</html>

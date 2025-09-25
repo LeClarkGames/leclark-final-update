@@ -11,9 +11,18 @@ import config
 from web_server import app
 from cogs.verification import VerificationButton
 from cogs.reporting import ReportTriggerView
+# --- ADD THIS ---
+from cogs.submissions import (
+    SubmissionViewClosed, 
+    SubmissionViewOpen, 
+    SubmissionViewKothClosed, 
+    SubmissionViewKothOpen, 
+    SubmissionViewKothTiebreaker
+)
+# --- END ADD ---
 
 load_dotenv()
-TOKEN = os.getenv("BOT_TOKEN_MAIN")
+TOKEN = os.getenv("BOT_TOKEN_TEST")
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] [%(levelname)-8s] %(name)-12s: %(message)s", datefmt="%Y-m-d %H:%M:%S")
 log = logging.getLogger(__name__)
@@ -34,6 +43,13 @@ class MyBot(commands.Bot):
         
         self.add_view(ReportTriggerView(bot=self))
         self.add_view(VerificationButton(bot=self))
+        # --- ADD THIS BLOCK ---
+        self.add_view(SubmissionViewClosed(self))
+        self.add_view(SubmissionViewOpen(self))
+        self.add_view(SubmissionViewKothClosed(self))
+        self.add_view(SubmissionViewKothOpen(self))
+        self.add_view(SubmissionViewKothTiebreaker(self))
+        # --- END ADD ---
         log.info("Registered persistent UI views.")
 
         cogs_to_load = [

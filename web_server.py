@@ -15,7 +15,7 @@ from cogs.ranking import get_rank_info
 
 load_dotenv()
 
-app = Quart(__name__)
+app = Quart(__name__, static_folder='static', static_url_path='/static')
 log = logging.getLogger(__name__)
 
 user_cache = {}
@@ -96,62 +96,47 @@ async def fetch_user_data(user_id: int):
     return {"name": "Unknown User", "avatar_url": "https://cdn.discordapp.com/embed/avatars/0.png"}
     
 async def is_valid_staff(guild_id, approver_name):
-    # This is a placeholder for a real staff check. 
-    # In a real scenario, you'd want a more secure way to verify the approver,
-    # maybe by having them log in via Discord OAuth on the web page.
-    # For now, we'll just check if the name is not empty.
     return approver_name is not None and approver_name != ""
-
-# web_server.py
 
 async def get_full_widget_data(guild_id: int) -> dict:
     bot = app.bot_instance
     guild = bot.get_guild(guild_id)
     if not guild: return {}
 
-    # --- Step 1: Gather base data and server status ---
     status = await database.get_setting(guild_id, 'submission_status')
     regular_queue_count = await database.get_submission_queue_count(guild_id, 'regular')
     koth_queue_count = await database.get_submission_queue_count(guild_id, 'koth')
     reviewing_user_id = await database.get_current_review(guild_id, 'regular')
     king_id = await database.get_setting(guild_id, 'koth_king_id')
 
-    # --- Step 2: Conditionally select the KOTH leaderboard data ---
     raw_koth_lb_data = []
     koth_leaderboard_title = "Leaderboard (All-Time)"
     
-    # If a battle is open, try to get the live session data
     if status == 'koth_open':
         cog = bot.get_cog("Submissions")
-        if cog: # Check if the cog is loaded
+        if cog:
             session_stats = cog.current_koth_session.get(guild_id, {})
             if session_stats:
                 koth_leaderboard_title = "Leaderboard (Current Battle)"
                 sorted_session = sorted(session_stats.items(), key=lambda item: item[1]['points'], reverse=True)
-                # Format session data as a list of (user_id, points) tuples
                 raw_koth_lb_data = [(uid, stats['points']) for uid, stats in sorted_session]
 
-    # If no session data was found (or battle isn't open), fall back to all-time leaderboard
     if not raw_koth_lb_data:
         all_time_data = await database.get_koth_leaderboard(guild_id)
-        # Format all-time data as a list of (user_id, points) tuples
         raw_koth_lb_data = [(uid, pts) for uid, pts, _, _, _ in all_time_data]
 
-    # --- Step 3: Collect all user IDs that need to be fetched ---
     user_ids_to_fetch = set()
     if reviewing_user_id: user_ids_to_fetch.add(reviewing_user_id)
     if king_id: user_ids_to_fetch.add(king_id)
-    for user_id, _ in raw_koth_lb_data[:5]: # Get top 5 users from the selected leaderboard
+    for user_id, _ in raw_koth_lb_data[:5]:
         user_ids_to_fetch.add(user_id)
 
-    # --- Step 4: Fetch all user data concurrently ---
     user_fetch_tasks = [fetch_user_data(uid) for uid in user_ids_to_fetch]
     fetched_users_list = await asyncio.gather(*user_fetch_tasks)
     
     user_data_map = {uid: data for uid, data in zip(user_ids_to_fetch, fetched_users_list)}
     default_user = {"name": "None", "avatar_url": ""}
 
-    # --- Step 5: Build the final data structure ---
     reviewing_user_name = user_data_map.get(reviewing_user_id, default_user)['name']
     king_name = user_data_map.get(king_id, default_user)['name']
     
@@ -170,7 +155,7 @@ async def get_full_widget_data(guild_id: int) -> dict:
             "queue": koth_queue_count,
             "king": king_name,
             "leaderboard": koth_leaderboard,
-            "leaderboard_title": koth_leaderboard_title # NEW: Pass the title to the widget
+            "leaderboard_title": koth_leaderboard_title
         }
     }
 
@@ -184,11 +169,10 @@ async def xp_leaderboard(guild_id: int):
     bot = app.bot_instance; guild = bot.get_guild(guild_id)
     if not guild: return await render_template("leaderboard.html", title="Error", guild_name="Unknown Server", users=[])
     raw_leaderboard = await database.get_leaderboard(guild_id, limit=100)
-    user_ids = [user_id for user_id, xp in raw_leaderboard] # Get all user IDs
+    user_ids = [user_id for user_id, xp in raw_leaderboard]
     cosmetics_task = database.get_all_user_cosmetics(guild_id, user_ids)
     user_data_task = asyncio.gather(*[fetch_user_data(uid) for uid in user_ids])
     cosmetics, fetched_users = await asyncio.gather(cosmetics_task, user_data_task)
-    users = []
     users = []
     for i, (user_id, xp) in enumerate(raw_leaderboard):
         user_info, (rank_name, _, _) = fetched_users[i], get_rank_info(xp)
@@ -219,7 +203,7 @@ async def koth_leaderboard(guild_id: int):
             "avatar_url": user_info['avatar_url'],
             "score": points,
             "details": f"W/L: {wins}/{losses} | Streak: {streak}",
-            "emoji": cosmetics.get(user_id) # Add the emoji
+            "emoji": cosmetics.get(user_id)
         })
     return await render_template("leaderboard.html", title=f"KOTH Leaderboard - {guild.name}", guild_name=guild.name, guild_icon_url=guild.icon.url if guild.icon else None, users=users, score_name="Points")
 
@@ -311,7 +295,7 @@ async def callback_youtube():
 @app.route('/user_activity/<int:guild_id>/<int:user_id>')
 async def user_activity_page(guild_id: int, user_id: int):
     token = request.args.get('token')
-    approver_name = "Staff Member" # Placeholder - see comment in is_valid_staff
+    approver_name = "Staff Member"
     
     request_data = await database.get_tier_request_by_token(token)
     if not request_data or request_data['guild_id'] != guild_id or request_data['user_id'] != user_id:
@@ -340,10 +324,6 @@ async def approve_tier_up():
     if not request_data:
         return "<h1>Invalid or expired request.</h1>", 403
 
-    # In a real app, you would have a login system to get the approver's real Discord name.
-    # For now, we use the placeholder from the form.
-    
-    # Put the approval data into the queue for the bot to process
     approval_details = {
         "guild_id": request_data['guild_id'],
         "user_id": request_data['user_id'],
@@ -353,13 +333,10 @@ async def approve_tier_up():
     }
     app.bot_instance.tier_approval_queue.put_nowait(approval_details)
 
-    # Clean up the one-time use token
     await database.delete_tier_request(token)
 
-    template_data = await get_verification_data(token) # Re-using this for success page data
+    template_data = await get_verification_data(token)
     return await render_template("success.html", account_name=f"User has been approved for Tier {request_data['next_tier']}", **template_data)
-
-# REPLACE the entire activity_dashboard function with this one
 
 @app.route('/dashboard/<int:guild_id>')
 async def activity_dashboard(guild_id: int):
@@ -368,7 +345,6 @@ async def activity_dashboard(guild_id: int):
     if not guild:
         return "<h1>Guild not found.</h1>", 404
 
-    # Fetch top users and channels
     top_users_raw = await database.get_top_users_overall(guild_id)
     top_text_raw = await database.get_top_text_channels(guild_id)
     top_voice_raw = await database.get_top_voice_channels(guild_id)
@@ -381,7 +357,6 @@ async def activity_dashboard(guild_id: int):
     top_text = [{'name': (guild.get_channel(cid) or "Unknown Channel").name, 'message_count': count} for cid, count in top_text_raw]
     top_voice = [{'name': (guild.get_channel(cid) or "Unknown Channel").name, 'voice_seconds': secs} for cid, secs in top_voice_raw]
 
-    # Render the template to a string first
     rendered_template = await render_template(
         "dashboard.html",
         guild_id=guild_id,
@@ -416,14 +391,20 @@ async def api_user_search(guild_id: int):
         return response
 
     found_member = None
-    # Search by ID, Name#Discrim, or just Name
+    # --- MODIFICATION: Exclude bots from the search ---
     if query.isdigit():
-        found_member = guild.get_member(int(query))
+        member = guild.get_member(int(query))
+        if member and not member.bot:
+            found_member = member
     else:
         if '#' in query:
-            found_member = discord.utils.get(guild.members, name=query.split('#')[0], discriminator=query.split('#')[1])
+            name, discrim = query.split('#')
+            member = discord.utils.get(guild.members, name=name, discriminator=discrim)
+            if member and not member.bot:
+                found_member = member
         if not found_member:
-            found_member = discord.utils.find(lambda m: query in m.display_name.lower(), guild.members)
+            # This lambda now checks `not m.bot`
+            found_member = discord.utils.find(lambda m: query in m.display_name.lower() and not m.bot, guild.members)
 
     if not found_member:
         response = jsonify({"error": "User not found in this server."})
@@ -444,6 +425,7 @@ async def api_user_search(guild_id: int):
 
     final_response = jsonify({
         "name": found_member.display_name,
+        "avatar_url": found_member.display_avatar.url,
         "tier": tier or 1,
         "total_messages": activity.get('message_count', 0) if activity else 0,
         "total_voice_seconds": activity.get('voice_seconds', 0) if activity else 0,

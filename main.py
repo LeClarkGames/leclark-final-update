@@ -40,7 +40,8 @@ class MyBot(commands.Bot):
             "cogs.settings", "cogs.events", "cogs.moderation",
             "cogs.verification", "cogs.reaction_roles", "cogs.reporting",
             "cogs.temp_vc", "cogs.submissions", "cogs.tasks", "cogs.ranking",
-            "cogs.shop", "cogs.utility", "cogs.inventory", "cogs.customize"
+            "cogs.shop", "cogs.utility", "cogs.inventory", "cogs.customize",
+            "cogs.tier_system"
         ]
         for cog in cogs_to_load:
             try:

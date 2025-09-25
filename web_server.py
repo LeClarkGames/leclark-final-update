@@ -1,4 +1,5 @@
-from quart import Quart, request, render_template, abort, websocket
+from quart import Quart, request, render_template, abort, websocket, flash, redirect, url_for, jsonify, make_response
+import discord
 import os
 import httpx
 import aiosqlite
@@ -93,6 +94,13 @@ async def fetch_user_data(user_id: int):
         log.warning(f"Could not fetch user data for {user_id}: {e}")
 
     return {"name": "Unknown User", "avatar_url": "https://cdn.discordapp.com/embed/avatars/0.png"}
+    
+async def is_valid_staff(guild_id, approver_name):
+    # This is a placeholder for a real staff check. 
+    # In a real scenario, you'd want a more secure way to verify the approver,
+    # maybe by having them log in via Discord OAuth on the web page.
+    # For now, we'll just check if the name is not empty.
+    return approver_name is not None and approver_name != ""
 
 # web_server.py
 
@@ -299,3 +307,149 @@ async def callback_youtube():
         return await render_template("success.html", account_name=account_name, **template_data)
     except Exception as e:
         print(f"Database error during YouTube callback: {e}"); return "An internal server error occurred.", 500
+    
+@app.route('/user_activity/<int:guild_id>/<int:user_id>')
+async def user_activity_page(guild_id: int, user_id: int):
+    token = request.args.get('token')
+    approver_name = "Staff Member" # Placeholder - see comment in is_valid_staff
+    
+    request_data = await database.get_tier_request_by_token(token)
+    if not request_data or request_data['guild_id'] != guild_id or request_data['user_id'] != user_id:
+        return "<h1>Invalid or expired link.</h1>", 403
+
+    user_data = await fetch_user_data(user_id)
+    activity_data = await database.get_user_activity(guild_id, user_id)
+    requirements = (await database.get_all_tier_requirements(guild_id)).get(request_data['next_tier'], {})
+
+    return await render_template(
+        "user_activity.html",
+        user=user_data,
+        activity=activity_data,
+        request=request_data,
+        requirements=requirements,
+        approver_name=approver_name
+    )
+
+@app.route('/approve_tier_up', methods=['POST'])
+async def approve_tier_up():
+    form = await request.form
+    token = form.get('token')
+    approver_name = form.get('approver_name')
+
+    request_data = await database.get_tier_request_by_token(token)
+    if not request_data:
+        return "<h1>Invalid or expired request.</h1>", 403
+
+    # In a real app, you would have a login system to get the approver's real Discord name.
+    # For now, we use the placeholder from the form.
+    
+    # Put the approval data into the queue for the bot to process
+    approval_details = {
+        "guild_id": request_data['guild_id'],
+        "user_id": request_data['user_id'],
+        "new_tier": request_data['next_tier'],
+        "message_id": request_data['message_id'],
+        "approver_name": approver_name
+    }
+    app.bot_instance.tier_approval_queue.put_nowait(approval_details)
+
+    # Clean up the one-time use token
+    await database.delete_tier_request(token)
+
+    template_data = await get_verification_data(token) # Re-using this for success page data
+    return await render_template("success.html", account_name=f"User has been approved for Tier {request_data['next_tier']}", **template_data)
+
+# REPLACE the entire activity_dashboard function with this one
+
+@app.route('/dashboard/<int:guild_id>')
+async def activity_dashboard(guild_id: int):
+    bot = app.bot_instance
+    guild = bot.get_guild(guild_id)
+    if not guild:
+        return "<h1>Guild not found.</h1>", 404
+
+    # Fetch top users and channels
+    top_users_raw = await database.get_top_users_overall(guild_id)
+    top_text_raw = await database.get_top_text_channels(guild_id)
+    top_voice_raw = await database.get_top_voice_channels(guild_id)
+
+    top_users = []
+    for user_id, msg_count, vc_sec in top_users_raw:
+        user_info = await fetch_user_data(user_id)
+        top_users.append({'name': user_info['name'], 'message_count': msg_count, 'voice_seconds': vc_sec})
+
+    top_text = [{'name': (guild.get_channel(cid) or "Unknown Channel").name, 'message_count': count} for cid, count in top_text_raw]
+    top_voice = [{'name': (guild.get_channel(cid) or "Unknown Channel").name, 'voice_seconds': secs} for cid, secs in top_voice_raw]
+
+    # Render the template to a string first
+    rendered_template = await render_template(
+        "dashboard.html",
+        guild_id=guild_id,
+        guild_name=guild.name,
+        guild_icon_url=guild.icon.url if guild.icon else None,
+        top_users=top_users,
+        top_text_channels=top_text,
+        top_voice_channels=top_voice
+    )
+    
+    response = await make_response(rendered_template)
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
+
+@app.route('/api/user_search/<int:guild_id>')
+async def api_user_search(guild_id: int):
+    query = request.args.get('query', '').lower()
+    if not query:
+        response = jsonify({"error": "No search query provided."})
+        response.status_code = 400
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        return response
+
+    bot = app.bot_instance
+    guild = bot.get_guild(guild_id)
+    if not guild:
+        response = jsonify({"error": "Guild not found."})
+        response.status_code = 404
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        return response
+
+    found_member = None
+    # Search by ID, Name#Discrim, or just Name
+    if query.isdigit():
+        found_member = guild.get_member(int(query))
+    else:
+        if '#' in query:
+            found_member = discord.utils.get(guild.members, name=query.split('#')[0], discriminator=query.split('#')[1])
+        if not found_member:
+            found_member = discord.utils.find(lambda m: query in m.display_name.lower(), guild.members)
+
+    if not found_member:
+        response = jsonify({"error": "User not found in this server."})
+        response.status_code = 404
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        return response
+
+    # Fetch all the user's data
+    activity = await database.get_user_activity(guild_id, found_member.id)
+    channel_activity_raw = await database.get_user_channel_activity(guild_id, found_member.id)
+    tier = await database.get_user_tier(guild_id, found_member.id)
+
+    channel_activity = {}
+    for cid, msgs, secs in channel_activity_raw:
+        channel = guild.get_channel(cid)
+        if channel:
+            channel_activity[channel.name] = {'messages': msgs, 'voice_seconds': secs}
+
+    final_response = jsonify({
+        "name": found_member.display_name,
+        "tier": tier or 1,
+        "total_messages": activity.get('message_count', 0) if activity else 0,
+        "total_voice_seconds": activity.get('voice_seconds', 0) if activity else 0,
+        "channel_activity": channel_activity
+    })
+    final_response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    final_response.headers['Pragma'] = 'no-cache'
+    final_response.headers['Expires'] = '0'
+    return final_response

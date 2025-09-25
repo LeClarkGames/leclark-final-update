@@ -41,6 +41,36 @@ async def initialize_database():
                 temp_vc_system_enabled INTEGER DEFAULT 1, reporting_system_enabled INTEGER DEFAULT 1
             )
         """)
+        await cursor.execute("""
+            CREATE TABLE IF NOT EXISTS channel_activity (
+                guild_id INTEGER NOT NULL, user_id INTEGER NOT NULL, channel_id INTEGER NOT NULL,
+                message_count INTEGER DEFAULT 0, voice_seconds INTEGER DEFAULT 0,
+                PRIMARY KEY (guild_id, user_id, channel_id)
+            )
+        """)
+        # --- Tier System Tables ---
+        await cursor.execute("""
+            CREATE TABLE IF NOT EXISTS user_tiers (
+                guild_id INTEGER NOT NULL, user_id INTEGER NOT NULL,
+                current_tier INTEGER DEFAULT 1,
+                PRIMARY KEY (guild_id, user_id)
+            )
+        """)
+        await cursor.execute("""
+            CREATE TABLE IF NOT EXISTS tier_requirements (
+                guild_id INTEGER NOT NULL, tier_level INTEGER NOT NULL,
+                messages_req INTEGER DEFAULT 0, voice_hours_req INTEGER DEFAULT 0,
+                PRIMARY KEY (guild_id, tier_level)
+            )
+        """)
+        await cursor.execute("""
+            CREATE TABLE IF NOT EXISTS tier_approval_requests (
+                guild_id INTEGER NOT NULL, user_id INTEGER NOT NULL,
+                next_tier INTEGER NOT NULL, token TEXT UNIQUE NOT NULL,
+                message_id INTEGER NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (guild_id, user_id)
+            )
+        """)
         await cursor.execute("CREATE TABLE IF NOT EXISTS warnings (warning_id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER NOT NULL, user_id INTEGER NOT NULL, moderator_id INTEGER NOT NULL, reason TEXT, issued_at TIMESTAMP NOT NULL, log_message_id INTEGER)")
         await cursor.execute("CREATE TABLE IF NOT EXISTS reaction_roles (message_id INTEGER NOT NULL, emoji TEXT NOT NULL, role_id INTEGER NOT NULL, guild_id INTEGER NOT NULL, PRIMARY KEY (message_id, emoji))")
         await cursor.execute("CREATE TABLE IF NOT EXISTS temporary_vcs (channel_id INTEGER PRIMARY KEY, owner_id INTEGER NOT NULL, text_channel_id INTEGER)")
@@ -94,14 +124,18 @@ async def initialize_database():
         # Inside the initialize_database function, within the "Schema Updates" section
         if 'custom_role_cost' not in settings_columns: await cursor.execute("ALTER TABLE guild_settings ADD COLUMN custom_role_cost INTEGER DEFAULT 100")
         if 'custom_role_divider_role_id' not in settings_columns: await cursor.execute("ALTER TABLE guild_settings ADD COLUMN custom_role_divider_role_id INTEGER")
-        
-        # --- ADD THESE THREE LINES ---
         if 'xp_boost_cost' not in settings_columns: await cursor.execute("ALTER TABLE guild_settings ADD COLUMN xp_boost_cost INTEGER DEFAULT 25")
         if 'priority_pass_cost' not in settings_columns: await cursor.execute("ALTER TABLE guild_settings ADD COLUMN priority_pass_cost INTEGER DEFAULT 50")
         if 'emoji_unlock_cost' not in settings_columns: await cursor.execute("ALTER TABLE guild_settings ADD COLUMN emoji_unlock_cost INTEGER DEFAULT 100")
+        if 'tier1_role_id' not in settings_columns: await cursor.execute("ALTER TABLE guild_settings ADD COLUMN tier1_role_id INTEGER")
+        if 'tier2_role_id' not in settings_columns: await cursor.execute("ALTER TABLE guild_settings ADD COLUMN tier2_role_id INTEGER")
+        if 'tier3_role_id' not in settings_columns: await cursor.execute("ALTER TABLE guild_settings ADD COLUMN tier3_role_id INTEGER")
+        if 'tier4_role_id' not in settings_columns: await cursor.execute("ALTER TABLE guild_settings ADD COLUMN tier4_role_id INTEGER")
 
     await conn.commit()
     log.info("Database tables initialized/updated successfully.")
+
+    
 
 # --- (All other database functions are unchanged) ---
 # --- SETTINGS FUNCTIONS ---
@@ -562,3 +596,134 @@ async def use_inventory_item(guild_id: int, user_id: int, item_id: str, quantity
         (quantity, guild_id, user_id, item_id)
     )
     await conn.commit()
+
+    # --- TIER SYSTEM FUNCTIONS ---
+
+async def set_user_tier(guild_id: int, user_id: int, tier: int):
+    conn = await get_db_connection()
+    await conn.execute("INSERT INTO user_tiers (guild_id, user_id, current_tier) VALUES (?, ?, ?) ON CONFLICT(guild_id, user_id) DO UPDATE SET current_tier = excluded.current_tier", (guild_id, user_id, tier))
+    await conn.commit()
+
+async def get_user_tier(guild_id: int, user_id: int):
+    conn = await get_db_connection()
+    async with conn.cursor() as cursor:
+        await cursor.execute("SELECT current_tier FROM user_tiers WHERE guild_id = ? AND user_id = ?", (guild_id, user_id))
+        result = await cursor.fetchone()
+        return result[0] if result else None
+
+async def update_user_activity(guild_id: int, user_id: int, message_count: int = 0, voice_seconds: int = 0):
+    conn = await get_db_connection()
+    await conn.execute("""
+        INSERT INTO user_activity (guild_id, user_id, message_count, voice_seconds, last_updated)
+        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(guild_id, user_id) DO UPDATE SET
+        message_count = message_count + excluded.message_count,
+        voice_seconds = voice_seconds + excluded.voice_seconds,
+        last_updated = CURRENT_TIMESTAMP
+    """, (guild_id, user_id, message_count, voice_seconds))
+    await conn.commit()
+
+async def set_tier_requirement(guild_id: int, tier_level: int, messages: int, voice_hours: int):
+    conn = await get_db_connection()
+    await conn.execute("INSERT INTO tier_requirements (guild_id, tier_level, messages_req, voice_hours_req) VALUES (?, ?, ?, ?) ON CONFLICT(guild_id, tier_level) DO UPDATE SET messages_req=excluded.messages_req, voice_hours_req=excluded.voice_hours_req", (guild_id, tier_level, messages, voice_hours))
+    await conn.commit()
+
+# REPLACE this function
+async def get_user_activity(guild_id: int, user_id: int):
+    """Calculates a user's total activity by summing their channel_activity."""
+    conn = await get_db_connection()
+    async with conn.cursor() as cursor:
+        await cursor.execute("""
+            SELECT SUM(message_count), SUM(voice_seconds) 
+            FROM channel_activity 
+            WHERE guild_id = ? AND user_id = ?
+        """, (guild_id, user_id))
+        result = await cursor.fetchone()
+        if not result or result[0] is None: 
+            return {'message_count': 0, 'voice_seconds': 0}
+        return {'message_count': result[0], 'voice_seconds': result[1]}
+
+async def get_all_tier_requirements(guild_id: int):
+    conn = await get_db_connection()
+    async with conn.cursor() as cursor:
+        await cursor.execute("SELECT tier_level, messages_req, voice_hours_req FROM tier_requirements WHERE guild_id = ?", (guild_id,))
+        rows = await cursor.fetchall()
+        return {row[0]: {'messages_req': row[1], 'voice_hours_req': row[2]} for row in rows}
+
+async def create_tier_approval_request(guild_id, user_id, next_tier, token, message_id):
+    conn = await get_db_connection()
+    await conn.execute("INSERT INTO tier_approval_requests (guild_id, user_id, next_tier, token, message_id) VALUES (?, ?, ?, ?, ?)", (guild_id, user_id, next_tier, token, message_id))
+    await conn.commit()
+
+async def get_tier_approval_request(guild_id, user_id):
+    conn = await get_db_connection()
+    async with conn.cursor() as cursor:
+        await cursor.execute("SELECT token FROM tier_approval_requests WHERE guild_id = ? AND user_id = ?", (guild_id, user_id))
+        result = await cursor.fetchone()
+        return result[0] if result else None
+
+async def get_tier_request_by_token(token: str):
+    conn = await get_db_connection()
+    async with conn.cursor() as cursor:
+        await cursor.execute("SELECT guild_id, user_id, next_tier, message_id FROM tier_approval_requests WHERE token = ?", (token,))
+        result = await cursor.fetchone()
+        if not result: return None
+        return {'guild_id': result[0], 'user_id': result[1], 'next_tier': result[2], 'message_id': result[3], 'token': token}
+
+async def delete_tier_request(token: str):
+    conn = await get_db_connection()
+    await conn.execute("DELETE FROM tier_approval_requests WHERE token = ?", (token,))
+    await conn.commit()
+
+async def get_all_tier_roles(guild_id: int):
+    settings = await get_all_settings(guild_id)
+    return {
+        1: settings.get('tier1_role_id'), 2: settings.get('tier2_role_id'),
+        3: settings.get('tier3_role_id'), 4: settings.get('tier4_role_id')
+    }
+
+# --- DASHBOARD & DETAILED STATS FUNCTIONS ---
+
+async def update_channel_activity(guild_id: int, user_id: int, channel_id: int, message_count: int = 0, voice_seconds: int = 0):
+    conn = await get_db_connection()
+    await conn.execute("""
+        INSERT INTO channel_activity (guild_id, user_id, channel_id, message_count, voice_seconds)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(guild_id, user_id, channel_id) DO UPDATE SET
+        message_count = message_count + excluded.message_count,
+        voice_seconds = voice_seconds + excluded.voice_seconds
+    """, (guild_id, user_id, channel_id, message_count, voice_seconds))
+    await conn.commit()
+
+async def get_user_channel_activity(guild_id: int, user_id: int):
+    conn = await get_db_connection()
+    async with conn.cursor() as cursor:
+        await cursor.execute("SELECT channel_id, message_count, voice_seconds FROM channel_activity WHERE guild_id = ? AND user_id = ?", (guild_id, user_id))
+        return await cursor.fetchall()
+
+# REPLACE this function
+async def get_top_users_overall(guild_id: int, limit: int = 5):
+    """Gets top users by summing their activity across all channels."""
+    conn = await get_db_connection()
+    async with conn.cursor() as cursor:
+        await cursor.execute("""
+            SELECT user_id, SUM(message_count), SUM(voice_seconds) 
+            FROM channel_activity 
+            WHERE guild_id = ? 
+            GROUP BY user_id 
+            ORDER BY SUM(message_count) DESC, SUM(voice_seconds) DESC 
+            LIMIT ?
+        """, (guild_id, limit))
+        return await cursor.fetchall()
+
+async def get_top_text_channels(guild_id: int, limit: int = 5):
+    conn = await get_db_connection()
+    async with conn.cursor() as cursor:
+        await cursor.execute("SELECT channel_id, SUM(message_count) as total_msgs FROM channel_activity WHERE guild_id = ? GROUP BY channel_id ORDER BY total_msgs DESC LIMIT ?", (guild_id, limit))
+        return await cursor.fetchall()
+
+async def get_top_voice_channels(guild_id: int, limit: int = 5):
+    conn = await get_db_connection()
+    async with conn.cursor() as cursor:
+        await cursor.execute("SELECT channel_id, SUM(voice_seconds) as total_voice FROM channel_activity WHERE guild_id = ? GROUP BY channel_id ORDER BY total_voice DESC LIMIT ?", (guild_id, limit))
+        return await cursor.fetchall()

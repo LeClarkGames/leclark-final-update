@@ -429,6 +429,75 @@ class MuteDurationModal(discord.ui.Modal, title="Set Mute Duration"):
         await interaction.response.send_message(f"✅ Automatic action set to **Mute** for **{duration}** minutes.", ephemeral=True)
         await self.parent_view.refresh_and_show(interaction, edit_original=True)
         
+# Add this class near the top with the other *SettingsView classes
+class TierSystemSettingsView(BaseSettingsView):
+    def __init__(self, bot: commands.Bot, parent_view: SettingsMainView):
+        super().__init__(bot, parent_view)
+        self.message: Optional[discord.Message] = None
+
+    async def get_tiers_embed(self, guild: discord.Guild):
+        embed = discord.Embed(title="📈 Tier System Settings", description="Configure roles and activity requirements for each tier.", color=config.BOT_CONFIG["EMBED_COLORS"]["INFO"])
+        roles = await database.get_all_tier_roles(guild.id)
+        reqs = await database.get_all_tier_requirements(guild.id)
+
+        for i in range(1, 5):
+            role_mention = f"<@&{roles.get(i)}>" if roles.get(i) else "Not Set"
+            if i == 1:
+                req_text = "Base tier for all new members."
+            else:
+                tier_req = reqs.get(i, {})
+                msg_req = tier_req.get('messages_req', 'N/A')
+                vc_req = tier_req.get('voice_hours_req', 'N/A')
+                req_text = f"Requires: `{msg_req}` messages & `{vc_req}` voice hours."
+            
+            embed.add_field(name=f"Tier {i} Role: {role_mention}", value=req_text, inline=False)
+        return embed
+
+    @discord.ui.button(label="Set Tier Roles", style=discord.ButtonStyle.secondary)
+    async def set_tier_roles(self, interaction: discord.Interaction, button: discord.ui.Button):
+        view = discord.ui.View(); view.add_item(TierRoleSelect(self))
+        await interaction.response.send_message("Select which tier's role you want to set:", view=view, ephemeral=True)
+
+    @discord.ui.button(label="Set Tier Requirements", style=discord.ButtonStyle.secondary)
+    async def set_tier_reqs(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(TierRequirementModal(self))
+
+# Add these supporting components as well
+class TierRoleSelect(discord.ui.Select):
+    def __init__(self, parent_view: TierSystemSettingsView):
+        options = [discord.SelectOption(label=f"Tier {i}", value=str(i)) for i in range(1, 5)]
+        super().__init__(placeholder="Select a tier...", options=options)
+        self.parent_view = parent_view
+    
+    async def callback(self, interaction: discord.Interaction):
+        tier_level = int(self.values[0])
+        view = discord.ui.View()
+        view.add_item(RoleSelect(f"tier{tier_level}_role_id", f"Set Tier {tier_level} Role", self.parent_view))
+        await interaction.response.edit_message(content=f"Now select the role for Tier {tier_level}:", view=view)
+
+class TierRequirementModal(discord.ui.Modal, title="Set Tier Requirements"):
+    def __init__(self, parent_view: TierSystemSettingsView):
+        super().__init__()
+        self.parent_view = parent_view
+        self.tier_level = discord.ui.TextInput(label="Tier to set requirements for (2-4)", placeholder="e.g., 2")
+        self.message_req = discord.ui.TextInput(label="Message Count Required", placeholder="e.g., 500")
+        self.voice_req = discord.ui.TextInput(label="Voice Hours Required", placeholder="e.g., 10")
+        self.add_item(self.tier_level)
+        self.add_item(self.message_req)
+        self.add_item(self.voice_req)
+    
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            tier = int(self.tier_level.value); assert 2 <= tier <= 4
+            messages = int(self.message_req.value); assert messages >= 0
+            voice = int(self.voice_req.value); assert voice >= 0
+        except (ValueError, AssertionError):
+            return await interaction.response.send_message("Invalid input. Please check the numbers.", ephemeral=True)
+        
+        await database.set_tier_requirement(interaction.guild.id, tier, messages, voice)
+        await interaction.response.send_message(f"✅ Requirements for Tier {tier} updated.", ephemeral=True)
+        await self.parent_view.refresh_and_show(interaction, edit_original=True)
+
 class SettingsMainView(BaseSettingsView):
     def __init__(self, bot: commands.Bot):
         super().__init__(bot)
@@ -496,6 +565,13 @@ class SettingsMainView(BaseSettingsView):
     async def shop_settings(self, interaction: discord.Interaction, button: discord.ui.Button):
         view = ShopSettingsView(self.bot, self)
         embed = await view.get_shop_embed(interaction.guild)
+        await interaction.response.edit_message(embed=embed, view=view)
+        view.message = await interaction.original_response()
+
+    @discord.ui.button(label="Tier System", style=discord.ButtonStyle.secondary, emoji="📈", row=3)
+    async def tier_system_settings(self, interaction: discord.Interaction, button: discord.ui.Button):
+        view = TierSystemSettingsView(self.bot, self)
+        embed = await view.get_tiers_embed(interaction.guild)
         await interaction.response.edit_message(embed=embed, view=view)
         view.message = await interaction.original_response()
 

@@ -51,6 +51,21 @@ async def send_verification_email(recipient_email: str, code: str):
 
 # --- MODIFIED: Added a helper for logging verification ---
 async def send_log_message(guild: discord.Guild, member: discord.Member, method: str):
+    # --- START of new code ---
+    # Assign Tier 1 role and initialize database entries on first verification
+    tier_roles = await database.get_all_tier_roles(guild.id)
+    if tier_roles.get(1):
+        tier1_role = guild.get_role(tier_roles[1])
+        if tier1_role:
+            try:
+                await member.add_roles(tier1_role, reason="Initial Verification - Tier 1")
+                # Initialize their records in the new tables
+                await database.set_user_tier(guild.id, member.id, 1)
+                log.info(f"Assigned Tier 1 role to {member.name} and initialized activity stats.")
+            except discord.Forbidden:
+                log.error(f"Could not assign Tier 1 role to {member.name}. Missing permissions.")
+    # --- END of new code ---
+
     log_channel_id = await database.get_setting(guild.id, 'log_channel_id')
     if log_channel_id:
         log_channel = guild.get_channel(log_channel_id)

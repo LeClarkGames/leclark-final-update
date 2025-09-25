@@ -250,7 +250,7 @@ class ModerationCog(commands.Cog, name="Moderation"):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        if message.author.bot or not message.guild or not message.content:
+        if not message.guild or not message.content or (message.author.bot and message.author.id == self.bot.user.id):
             return
 
         bad_words_list = self.bad_words_cache.get(message.guild.id)
@@ -258,7 +258,7 @@ class ModerationCog(commands.Cog, name="Moderation"):
             return
 
         for bad_word in bad_words_list:
-            if re.search(r'\b' + re.escape(bad_word) + r'\b', message.content.lower()):
+            if re.search(r'\\b' + re.escape(bad_word) + r'\\b', message.content.lower()):
                 try:
                     await message.delete()
                     await message.author.send(f"Your message in **{message.guild.name}** was deleted for containing a forbidden word: `||{bad_word}||`.")

@@ -131,7 +131,7 @@ class RankingCog(commands.Cog, name="Ranking"):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        if message.author.bot or not message.guild:
+        if not message.guild or (message.author.bot and message.author.id == self.bot.user.id):
             return
         
         if not await database.get_setting(message.guild.id, 'ranking_system_enabled'):

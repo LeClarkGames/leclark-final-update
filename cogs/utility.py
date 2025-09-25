@@ -210,5 +210,22 @@ class UtilityCog(commands.Cog, name="Utility"):
         
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
+    @app_commands.command(name="dashboard", description="Get the link to the server activity dashboard.")
+    @utils.is_bot_moderator() # Or is_bot_admin()
+    async def dashboard(self, interaction: discord.Interaction):
+        base_url = os.getenv("APP_BASE_URL", "http://127.0.0.1:5000")
+        link = f"{base_url}/dashboard/{interaction.guild.id}"
+        
+        embed = discord.Embed(
+            title="📊 Server Activity Dashboard",
+            description=f"Click the button below to view detailed server and member statistics. This link is for staff members only.",
+            color=config.BOT_CONFIG["EMBED_COLORS"]["INFO"]
+        )
+        
+        view = discord.ui.View()
+        view.add_item(discord.ui.Button(label="Open Dashboard", url=link, emoji="🔗"))
+        
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
 async def setup(bot: commands.Bot):
     await bot.add_cog(UtilityCog(bot))

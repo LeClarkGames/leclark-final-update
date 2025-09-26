@@ -18,18 +18,31 @@ class ClaimOwnershipView(discord.ui.View):
         self.message = None
 
     @discord.ui.button(label="Claim Ownership", style=discord.ButtonStyle.success, emoji="👑")
-    async def claim_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def claim_button(self, interaction: discord.Interaction, button: discord.ui.Button):  
+        # --- Start of new/modified code ---
+        # Disable the button to prevent multiple claims
+        button.disabled = True
+        button.label = "Claiming..."
+        await interaction.response.edit_message(view=self)
+        # --- End of new/modified code ---
+
         # Check if the user is in the voice channel
         if not interaction.user.voice or interaction.user.voice.channel != self.channel:
-            return await interaction.response.send_message("You must be in the voice channel to claim it.", ephemeral=True)
-            
+            # Re-enable the button if the user is not in the VC
+            button.disabled = False
+            button.label = "Claim Ownership"
+            await interaction.edit_original_response(view=self)
+            # Send an ephemeral message instead of editing the response
+            return await interaction.followup.send("You must be in the voice channel to claim it.", ephemeral=True)
+
         # Update the owner in the database to the new user
         await database.update_temp_vc_owner(self.channel.id, interaction.user.id)
-        
+
         # Give the new owner channel management permissions
         await self.channel.set_permissions(interaction.user, manage_channels=True, move_members=True)
-        
-        await interaction.response.edit_message(content=f"👑 **{interaction.user.mention}** has claimed ownership of this channel!", view=None)
+
+        # Edit the original message to show the new owner
+        await interaction.edit_original_response(content=f"👑 **{interaction.user.mention}** has claimed ownership of this channel!", view=None)
         log.info(f"User {interaction.user.id} claimed ownership of VC {self.channel.id}")
         self.stop()
 

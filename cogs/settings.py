@@ -5,7 +5,7 @@ from typing import List, Optional
 
 import database
 import config
-from utils import is_bot_admin
+import utils
 
 # --- Reusable Dropdown Components ---
 class ChannelSelect(discord.ui.ChannelSelect):
@@ -76,7 +76,6 @@ class RoleManagementSelect(discord.ui.RoleSelect):
         await database.update_setting(interaction.guild.id, setting_name, ",".join(role_ids))
         await self.parent_view.refresh_and_show(interaction, edit_original=True)
 
-
 # --- Base View & Back Button ---
 class BaseSettingsView(discord.ui.View):
     def __init__(self, bot: commands.Bot, parent_view: discord.ui.View = None):
@@ -122,9 +121,28 @@ class BaseSettingsView(discord.ui.View):
             embed = await self.view.parent_view.get_settings_embed(interaction.guild)
             await interaction.response.edit_message(content=None, embed=embed, view=self.view.parent_view)
 
-# --- Forward declaration for type hinting ---
 class SettingsMainView(BaseSettingsView):
-    pass
+    @discord.ui.button(label="Channels", style=discord.ButtonStyle.secondary, emoji="📺", row=0)
+    async def channel_settings(self, interaction: discord.Interaction, button: discord.ui.Button):
+        items = [
+            ChannelSelect("log_channel_id", "Set Log Channel", self, [discord.ChannelType.text]),
+            ChannelSelect("report_channel_id", "Set Report Button Channel", self, [discord.ChannelType.text]),
+            ChannelSelect("mod_chat_channel_id", "Set Mod Chat Channel", self, [discord.ChannelType.text]),
+            ChannelSelect("announcement_channel_id", "Set Announcement Channel", self, [discord.ChannelType.text])
+        ]
+        view = GenericSettingsView(self.bot, self, "Channel Settings", items)
+        embed = await view.get_embed(interaction.guild)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+    @discord.ui.button(label="Temp VCs", style=discord.ButtonStyle.secondary, emoji="🔊", row=1)
+    async def temp_vc_settings(self, interaction: discord.Interaction, button: discord.ui.Button):
+        items = [
+            ChannelSelect("temp_vc_hub_id", "Set 'Join to Create' Hub Channel", self, [discord.ChannelType.voice]),
+            ChannelSelect("temp_vc_category_id", "Set Category for New VCs", self, [discord.ChannelType.category])
+        ]
+        view = GenericSettingsView(self.bot, self, "Temp VC Settings", items)
+        embed = await view.get_embed(interaction.guild)
+        await interaction.response.edit_message(embed=embed, view=view)
     
 # --- Sub-Menu Views ---
 class ChannelSettingsView(BaseSettingsView):
@@ -625,13 +643,29 @@ class ShopSettingsView(BaseSettingsView):
     async def set_emoji_cost(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(ShopCostModal(self, "Emoji Unlock", "emoji_unlock_cost"))
 
+class GenericSettingsView(BaseSettingsView):
+    def __init__(self, bot: commands.Bot, parent_view: SettingsMainView, title: str, items: list):
+        super().__init__(bot, parent_view)
+        self.title = title
+        for item in items:
+            self.add_item(item)
+
+    async def get_embed(self, guild: discord.Guild):
+        # This method can be expanded to show the current settings in the embed
+        embed = discord.Embed(
+            title=self.title,
+            description=f"Configure the settings for {self.title.lower()}.",
+            color=config.BOT_CONFIG["EMBED_COLORS"]["INFO"]
+        )
+        return embed
+
 # --- Main Cog ---
 class SettingsCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
     @app_commands.command(name="settings", description="Opens the interactive settings panel for the bot.")
-    @is_bot_admin()
+    @utils.has_permission("admin")
     async def settings(self, interaction: discord.Interaction):
         view = SettingsMainView(self.bot)
         embed = await view.get_settings_embed(interaction.guild)

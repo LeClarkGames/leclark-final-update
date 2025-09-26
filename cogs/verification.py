@@ -49,22 +49,20 @@ async def send_verification_email(recipient_email: str, code: str):
         log.error(f"Failed to send verification email: {e}")
         return False
 
-# --- MODIFIED: Added a helper for logging verification ---
 async def send_log_message(guild: discord.Guild, member: discord.Member, method: str):
-    # --- START of new code ---
-    # Assign Tier 1 role and initialize database entries on first verification
     tier_roles = await database.get_all_tier_roles(guild.id)
-    if tier_roles.get(1):
-        tier1_role = guild.get_role(tier_roles[1])
-        if tier1_role:
+    if tier_roles.get(4): # Check for Tier 4 role
+        tier4_role = guild.get_role(tier_roles[4])
+        if tier4_role:
             try:
-                await member.add_roles(tier1_role, reason="Initial Verification - Tier 1")
-                # Initialize their records in the new tables
-                await database.set_user_tier(guild.id, member.id, 1)
-                log.info(f"Assigned Tier 1 role to {member.name} and initialized activity stats.")
+                # Add the Tier 4 role to the new member
+                await member.add_roles(tier4_role, reason="Initial Verification - Tier 4")
+                # Set their starting tier to 4 in the database
+                await database.set_user_tier(guild.id, member.id, 4)
+                log.info(f"Assigned Tier 4 role to {member.name} and initialized activity stats.")
             except discord.Forbidden:
-                log.error(f"Could not assign Tier 1 role to {member.name}. Missing permissions.")
-    # --- END of new code ---
+                log.error(f"Could not assign Tier 4 role to {member.name}. Missing permissions.")
+    # --- END of new/modified code ---
 
     log_channel_id = await database.get_setting(guild.id, 'log_channel_id')
     if log_channel_id:
@@ -323,7 +321,7 @@ class VerificationCog(commands.Cog, name="Verification"):
         await message.channel.send("❌ That code is incorrect or has expired. Please start the verification process again in your server.")
 
     @app_commands.command(name="setup_verification", description="Sends the verification message.")
-    @utils.is_bot_admin()
+    @utils.has_permission("admin")
     async def setup_verification(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         channel_id = await database.get_setting(interaction.guild.id, 'verification_channel_id')

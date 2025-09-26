@@ -187,14 +187,14 @@ class UtilityCog(commands.Cog, name="Utility"):
         self.bot = bot
 
     @app_commands.command(name="embed", description="Create a custom embed message.")
-    @utils.is_bot_moderator()
+    @utils.has_permission("mod")
     async def embed(self, interaction: discord.Interaction):
         view = EmbedBuilderView(self.bot)
         initial_embed = await view.build_embed()
         await interaction.response.send_message("*Live Preview:*", embed=initial_embed, view=view, ephemeral=True)
 
     @app_commands.command(name="widget", description="Get the secure link page for your stream widgets.")
-    @utils.is_bot_admin()
+    @utils.has_permission("admin")
     async def widget(self, interaction: discord.Interaction):
         base_url = os.getenv("APP_BASE_URL", "http://127.0.0.1:5000")
         link = f"{base_url}/widget/{interaction.guild.id}"
@@ -211,7 +211,7 @@ class UtilityCog(commands.Cog, name="Utility"):
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     @app_commands.command(name="dashboard", description="Get the link to the server activity dashboard.")
-    @utils.is_bot_moderator() # Or is_bot_admin()
+    @utils.has_permission("mod")
     async def dashboard(self, interaction: discord.Interaction):
         base_url = os.getenv("APP_BASE_URL", "http://127.0.0.1:5000")
         link = f"{base_url}/dashboard/{interaction.guild.id}"

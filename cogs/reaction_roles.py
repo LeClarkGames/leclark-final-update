@@ -3,7 +3,7 @@ from discord import app_commands
 from discord.ext import commands
 import logging
 import database
-from utils import is_bot_admin
+import utils
 
 log = logging.getLogger(__name__)
 
@@ -13,7 +13,7 @@ class ReactionRolesCog(commands.Cog, name="Reaction Roles"):
 
     @app_commands.command(name="create_reaction_role_message", description="Creates a new message for reaction roles.")
     @app_commands.guild_only()
-    @is_bot_admin()
+    @utils.has_permission("admin")
     @app_commands.describe(channel="The channel to send the message in.", message_content="The text for the message")
     async def create_rr_message(self, interaction: discord.Interaction, channel: discord.TextChannel, message_content: str):
         await interaction.response.defer(ephemeral=True)
@@ -25,7 +25,7 @@ class ReactionRolesCog(commands.Cog, name="Reaction Roles"):
 
     @app_commands.command(name="set_reaction_role", description="Adds a reaction-role mapping to a message.")
     @app_commands.guild_only()
-    @is_bot_admin()
+    @utils.has_permission("admin")
     @app_commands.describe(message_id="The ID of the message to add the reaction role to.", emoji="The emoji for the reaction.", role="The role to assign.")
     async def set_reaction_role(self, interaction: discord.Interaction, message_id: str, emoji: str, role: discord.Role):
         await interaction.response.defer(ephemeral=True)

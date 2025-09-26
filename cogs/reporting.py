@@ -100,7 +100,7 @@ class ReportingCog(commands.Cog, name="Reporting"):
 
     @app_commands.command(name="setup_report", description="Sends the 'Report a Message' button.")
     @app_commands.guild_only()
-    @utils.is_bot_admin()
+    @utils.has_permission("admin")
     async def setup_report(self, interaction: discord.Interaction):
         report_channel_id = await database.get_setting(interaction.guild.id, 'report_channel_id')
         if not report_channel_id: return await interaction.response.send_message("❌ Report channel not set. Use `/settings report_channel` first.", ephemeral=True)

@@ -76,7 +76,7 @@ class TierSystemCog(commands.Cog, name="Tier System"):
 
     # --- Background Tasks ---
 
-    @tasks.loop(minutes=30)
+    @tasks.loop(minutes=1)
     async def activity_check_loop(self):
         log.info("Running periodic activity check for tier upgrades...")
         for guild in self.bot.guilds:
@@ -84,14 +84,30 @@ class TierSystemCog(commands.Cog, name="Tier System"):
             if not all_requirements:
                 continue
 
+            tier_roles = await database.get_all_tier_roles(guild.id)
+            tier4_role_id = tier_roles.get(4) # Check for the lowest tier role
+
             for member in guild.members:
                 if member.bot: continue
 
                 current_tier = await database.get_user_tier(guild.id, member.id)
-                if current_tier is None or current_tier >= 4: # Max tier
+
+                if current_tier is None:
+                    # Enroll existing members if they have the base role but aren't in the DB
+                    if tier4_role_id and any(role.id == tier4_role_id for role in member.roles):
+                        await database.set_user_tier(guild.id, member.id, 4)
+                        current_tier = 4
+                        log.info(f"Automatically enrolled existing member {member.name} into the tier system at Tier 4.")
+                    else:
+                        # If they have no tier role, we don't track them for promotion
+                        continue
+
+                # Check if user is already at the highest tier (Tier 1)
+                if current_tier <= 1:
                     continue
                 
-                next_tier = current_tier + 1
+                # Promote downwards in number (e.g., from Tier 3 to Tier 2)
+                next_tier = current_tier - 1
                 reqs = all_requirements.get(next_tier)
                 if not reqs:
                     continue
@@ -100,21 +116,21 @@ class TierSystemCog(commands.Cog, name="Tier System"):
                 if not activity:
                     continue
 
-                # Check if user meets requirements
                 if (activity['message_count'] >= reqs['messages_req'] and 
                     (activity['voice_seconds'] / 3600) >= reqs['voice_hours_req']):
                     
-                    # Check if there's already a pending request
                     if await database.get_tier_approval_request(guild.id, member.id):
-                        continue # Skip if a request is already pending
+                        continue
 
                     log_channel_id = await database.get_setting(guild.id, 'log_channel_id')
                     if not log_channel_id: continue
                     log_channel = guild.get_channel(log_channel_id)
                     if not log_channel: continue
-                    
+
+                    # --- Start of new/modified code ---
                     token = secrets.token_urlsafe(16)
-                    
+
+                    # Create the view and embed first
                     embed = discord.Embed(
                         title="✨ Tier Upgrade Recommendation",
                         description=f"{member.mention} is eligible to be promoted to **Tier {next_tier}**.",
@@ -125,10 +141,14 @@ class TierSystemCog(commands.Cog, name="Tier System"):
                     embed.set_footer(text=f"User ID: {member.id}")
 
                     view = TierApprovalView(self.bot, guild.id, member.id, next_tier, token)
+                    
+                    # Send the message to get the message ID
                     message = await log_channel.send(embed=embed, view=view)
                     
-                    await database.create_tier_approval_request(guild.id, member.id, next_tier, token, message.id)
-                    log.info(f"Created tier upgrade request for {member.name} in {guild.name}.")
+                    # NOW, save everything to the database in one atomic operation
+                    await database.create_or_update_tier_approval_request(guild.id, member.id, next_tier, token, message.id)
+                    log.info(f"Created/updated tier upgrade request for {member.name} in {guild.name}.")
+                    # --- End of new/modified code ---
     
     @activity_check_loop.before_loop
     async def before_activity_check_loop(self):
@@ -143,13 +163,18 @@ class TierSystemCog(commands.Cog, name="Tier System"):
             user_id = approval_data['user_id']
             new_tier = approval_data['new_tier']
             message_id = approval_data['message_id']
-            approver_name = approval_data['approver_name'] # Assuming you'll pass this from web
+            approver_name = approval_data['approver_name']
 
             guild = self.bot.get_guild(guild_id)
             if not guild: return
 
             member = guild.get_member(user_id)
             if not member: return
+
+            # --- START OF MODIFICATION ---
+            # Update the user's tier in the database immediately
+            await database.set_user_tier(guild.id, member.id, new_tier)
+            # --- END OF MODIFICATION ---
 
             # Get and assign new role, remove old one
             tier_roles = await database.get_all_tier_roles(guild.id)

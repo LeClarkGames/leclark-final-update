@@ -513,6 +513,12 @@ class SubmissionsCog(commands.Cog, name="Submissions"):
                     submission_id = await database.add_submission(message.guild.id, message.author.id, attachment.url, submission_type)
                     await message.add_reaction("✅")
 
+                    queue_count = await database.get_submission_queue_count(message.guild.id, submission_type)
+                    await message.channel.send(
+                    f"✅ **{message.author.mention}**, your track has been submitted! You are currently position **#{queue_count}** in the queue.",
+                    delete_after=10  # Deletes the message after 10 seconds
+                    )       
+
                     await self._update_panel_after_submission(message.guild)
 
                     if submission_type == 'regular':
@@ -544,7 +550,7 @@ class SubmissionsCog(commands.Cog, name="Submissions"):
     koth_group = app_commands.Group(name="koth", description="Admin commands for King of the Hill.")
 
     @koth_group.command(name="addpoint", description="Manually adds points to a user.")
-    @utils.is_bot_admin()
+    @utils.has_permission("admin")
     @app_commands.describe(
         member="The member to give points to.",
         points="The number of points to add (defaults to 1).",
@@ -569,7 +575,7 @@ class SubmissionsCog(commands.Cog, name="Submissions"):
 
 
     @koth_group.command(name="removepoint", description="Manually removes points from a user.")
-    @utils.is_bot_admin()
+    @utils.has_permission("admin")
     @app_commands.describe(
         member="The member to remove points from.",
         points="The number of points to remove (defaults to 1).",
@@ -594,7 +600,7 @@ class SubmissionsCog(commands.Cog, name="Submissions"):
             await panel_message.edit(embed=embed, view=view)
 
     @app_commands.command(name="setup_submission_panel", description="Posts the interactive panel for managing music submissions.")
-    @utils.is_bot_admin()
+    @utils.has_permission("admin")
     async def setup_submission_panel(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
 

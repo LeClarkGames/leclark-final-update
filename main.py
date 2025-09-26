@@ -22,7 +22,7 @@ from cogs.submissions import (
 # --- END ADD ---
 
 load_dotenv()
-TOKEN = os.getenv("BOT_TOKEN_TEST")
+TOKEN = os.getenv("BOT_TOKEN_MAIN")
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] [%(levelname)-8s] %(name)-12s: %(message)s", datefmt="%Y-m-d %H:%M:%S")
 log = logging.getLogger(__name__)
@@ -30,6 +30,7 @@ log = logging.getLogger(__name__)
 class MyBot(commands.Bot):
     def __init__(self, *, intents: discord.Intents):
         super().__init__(command_prefix="!", intents=intents)
+        self.action_queue = asyncio.Queue()
 
     async def setup_hook(self):
 
@@ -57,7 +58,7 @@ class MyBot(commands.Bot):
             "cogs.verification", "cogs.reaction_roles", "cogs.reporting",
             "cogs.temp_vc", "cogs.submissions", "cogs.tasks", "cogs.ranking",
             "cogs.shop", "cogs.utility", "cogs.inventory", "cogs.customize",
-            "cogs.tier_system"
+            "cogs.tier_system", "cogs.panel_handler"
         ]
         for cog in cogs_to_load:
             try:
@@ -82,6 +83,7 @@ if __name__ == "__main__":
     intents.members = True
     intents.message_content = True
     intents.voice_states = True
+    intents.presences = True
     
     bot = MyBot(intents=intents)
     bot.run(TOKEN)

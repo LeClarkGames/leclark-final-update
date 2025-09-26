@@ -1,4 +1,4 @@
-from quart import Quart, request, render_template, abort, websocket, flash, redirect, url_for, jsonify, make_response
+from quart import Quart, request, render_template, abort, websocket, flash, redirect, url_for, jsonify, make_response, session
 import discord
 import os
 import httpx
@@ -8,19 +8,30 @@ import asyncio
 import logging
 import json
 import secrets
+import utils
 from collections import defaultdict
+from urllib.parse import urlencode
+import time
+import config
 
 import database
-from cogs.ranking import get_rank_info 
+from cogs.ranking import get_rank_info
 
 load_dotenv()
 
 app = Quart(__name__, static_folder='static', static_url_path='/static')
 log = logging.getLogger(__name__)
 
+app.secret_key = os.getenv("QUART_SECRET_KEY")
+
 user_cache = {}
 cache_lock = asyncio.Lock()
 CACHE_DURATION_SECONDS = 300 # Cache users for 5 minutes
+
+# --- Caching Setup ---
+web_cache = {}
+CACHE_EXPIRATION = 120  # 2 minutes
+# ---------------------
 
 # --- CONFIGURATION & GLOBALS ---
 APP_BASE_URL = os.getenv("APP_BASE_URL", "http://127.0.0.1:5000")
@@ -30,8 +41,29 @@ YOUTUBE_CLIENT_ID = os.getenv("YOUTUBE_CLIENT_ID")
 YOUTUBE_CLIENT_SECRET = os.getenv("YOUTUBE_CLIENT_SECRET")
 DB_FILE = "bot_database.db"
 
+# --- NEW: Discord OAuth2 Credentials ---
+DISCORD_CLIENT_ID = os.getenv("DISCORD_CLIENT_ID")
+DISCORD_CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET")
+DISCORD_REDIRECT_URI = f"{APP_BASE_URL}/callback"
+DISCORD_API_BASE_URL = "https://discord.com/api"
+
 TWITCH_REDIRECT_URI = f"{APP_BASE_URL}/callback/twitch"
 YOUTUBE_REDIRECT_URI = f"{APP_BASE_URL}/callback/youtube"
+
+from functools import wraps
+
+def login_required(f):
+    @wraps(f)
+    async def decorated_function(guild_id: int, *args, **kwargs):
+        user_id = session.get('user_id')
+        authorized_guilds = session.get('authorized_guilds', [])
+
+        if not user_id or guild_id not in authorized_guilds:
+            session['login_redirect_guild_id'] = guild_id
+            return redirect(url_for('panel_login_page', guild_id=guild_id))
+        
+        return await f(guild_id, *args, **kwargs)
+    return decorated_function
 
 # --- WebSocket Connection Manager ---
 class WebSocketManager:
@@ -160,12 +192,254 @@ async def get_full_widget_data(guild_id: int) -> dict:
     }
 
 # --- WEB ROUTES ---
+
+# --- Staff Panel Authentication Routes ---
+
+@app.route('/panel/login/<int:guild_id>')
+async def panel_login_page(guild_id: int):
+    """Renders the login page for a specific guild."""
+    guild = app.bot_instance.get_guild(guild_id)
+    if not guild: return "<h1>Guild not found.</h1>", 404
+    return await render_template(
+        "panel_login.html",
+        guild_name=guild.name,
+        guild_icon_url=guild.icon.url if guild.icon else None
+    )
+
+async def get_user_access_level(guild: discord.Guild, user_id: int) -> str:
+    """Checks if a user is an Admin or a Mod."""
+    member = guild.get_member(user_id)
+    if not member:
+        return "Unknown"
+    
+    if await utils.has_admin_role(member):
+        return "Admin"
+    if await utils.has_mod_role(member):
+        return "Moderator"
+    return "Member"
+
+@app.route('/panel/<int:guild_id>')
+@login_required
+async def panel_home(guild_id: int):
+    """Renders the main dashboard page."""
+    guild = app.bot_instance.get_guild(guild_id)
+    user_info = await fetch_user_data(int(session.get('user_id')))
+    access_level = await get_user_access_level(guild, int(session.get('user_id')))
+
+    # Fetch data for dashboard cards
+    xp_leaderboard_raw = await database.get_leaderboard(guild.id, limit=5)
+    xp_leaderboard_users = []
+    for user_id_xp, xp in xp_leaderboard_raw:
+        user_data = await fetch_user_data(user_id_xp)
+        xp_leaderboard_users.append({"name": user_data['name'], "score": xp})
+
+    koth_leaderboard_raw = await database.get_koth_leaderboard(guild.id)
+    koth_leaderboard_users = []
+    for user_id_koth, points, w, l, s in koth_leaderboard_raw[:5]:
+        user_data = await fetch_user_data(user_id_koth)
+        koth_leaderboard_users.append({"name": user_data['name'], "score": points})
+
+    last_member_joined = sorted(guild.members, key=lambda m: m.joined_at, reverse=True)[0]
+    online_members = sum(1 for m in guild.members if m.status != discord.Status.offline)
+    
+    excluded_ids = set(config.BOT_CONFIG.get("MILESTONE_EXCLUDED_IDS", []))
+    total_bots = sum(1 for m in guild.members if m.bot)
+    true_member_count = guild.member_count - total_bots - len(excluded_ids)
+    
+    return await render_template(
+        "panel_dashboard.html",
+        guild_id=guild_id, guild_name=guild.name, guild_icon_url=guild.icon.url if guild.icon else None,
+        user_name=user_info['name'], user_avatar_url=user_info['avatar_url'],
+        xp_leaderboard=xp_leaderboard_users, koth_leaderboard=koth_leaderboard_users,
+        last_member=last_member_joined.display_name, online_count=online_members, member_count=true_member_count,
+        access_level=access_level
+    )
+
+@app.route('/panel/<int:guild_id>/statistics')
+@login_required
+async def panel_statistics(guild_id: int):
+    """Renders the statistics page."""
+    guild = app.bot_instance.get_guild(guild_id)
+    user_info = await fetch_user_data(int(session.get('user_id')))
+    access_level = await get_user_access_level(guild, int(session.get('user_id')))
+
+    # Fetch data for stats cards
+    top_users_raw = await database.get_top_users_overall(guild_id, limit=10)
+    top_text_raw = await database.get_top_text_channels(guild_id, limit=5)
+    top_voice_raw = await database.get_top_voice_channels(guild_id, limit=5)
+
+    top_users = []
+    for user_id_stats, msg_count, vc_sec in top_users_raw:
+        user_info_db = await fetch_user_data(user_id_stats)
+        top_users.append({'name': user_info_db['name'], 'message_count': msg_count, 'voice_seconds': vc_sec})
+
+    # --- Start of new/modified code ---
+    top_text = []
+    for channel_id, count in top_text_raw:
+        channel = guild.get_channel(channel_id)
+        channel_name = channel.name if channel else "Deleted Channel"
+        top_text.append({'name': channel_name, 'message_count': count})
+
+    top_voice = []
+    for channel_id, secs in top_voice_raw:
+        channel = guild.get_channel(channel_id)
+        channel_name = channel.name if channel else "Deleted Channel"
+        top_voice.append({'name': channel_name, 'voice_seconds': secs})
+    # --- End of new/modified code ---
+
+    return await render_template(
+        "panel_statistics.html",
+        guild_id=guild_id, guild_name=guild.name, guild_icon_url=guild.icon.url if guild.icon else None,
+        user_name=user_info['name'], user_avatar_url=user_info['avatar_url'],
+        top_users=top_users, top_text_channels=top_text, top_voice_channels=top_voice,
+        access_level=access_level
+    )
+
+@app.route('/panel/<int:guild_id>/widgets')
+@login_required
+async def panel_widgets(guild_id: int):
+    """Renders the widgets page."""
+    guild = app.bot_instance.get_guild(guild_id)
+    user_info = await fetch_user_data(int(session.get('user_id')))
+    access_level = await get_user_access_level(guild, int(session.get('user_id')))
+
+    # Get the unique token for the guild's widgets
+    token = await database.get_or_create_widget_token(guild_id)
+    widget_url_base = f"{APP_BASE_URL}/widget/view/{token}"
+
+    return await render_template(
+        "panel_widgets.html",
+        guild_id=guild_id, guild_name=guild.name, guild_icon_url=guild.icon.url if guild.icon else None,
+        user_name=user_info['name'], user_avatar_url=user_info['avatar_url'],
+        regular_widget_url=f"{widget_url_base}?type=regular",
+        koth_widget_url=f"{widget_url_base}?type=koth",
+        access_level=access_level
+    )
+
+@app.route('/panel/<int:guild_id>/mod-menu')
+@login_required
+async def panel_mod_menu(guild_id: int):
+    """Renders the moderation menu page."""
+    guild = app.bot_instance.get_guild(guild_id)
+    user_info = await fetch_user_data(int(session.get('user_id')))
+    access_level = await get_user_access_level(guild, int(session.get('user_id')))
+
+    return await render_template(
+        "panel_mod_menu.html",
+        guild_id=guild_id, guild_name=guild.name, guild_icon_url=guild.icon.url if guild.icon else None,
+        user_name=user_info['name'], user_avatar_url=user_info['avatar_url'],
+        access_level=access_level
+    )
+
+@app.route('/api/v1/actions/moderate/<int:guild_id>', methods=['POST'])
+@login_required
+async def api_moderate_user(guild_id: int):
+    """API endpoint to queue a moderation action."""
+    form = await request.form
+    task = {
+        "action": "moderate_user",
+        "guild_id": guild_id,
+        "moderator_id": int(session.get('user_id')),
+        "target_id": form.get('target_id'),
+        "mod_action": form.get('mod_action'),
+        "reason": form.get('reason', 'No reason provided')
+    }
+
+    # Basic validation
+    if not task['target_id'] or not task['mod_action']:
+        return jsonify({"error": "User ID and Action are required."}), 400
+
+    try:
+        # Put the task into the bot's queue
+        app.bot_instance.action_queue.put_nowait(task)
+        return jsonify({"message": f"Action '{task['mod_action'].capitalize()}' has been successfully queued."}), 200
+    except Exception as e:
+        log.error(f"Failed to queue moderation action: {e}")
+        return jsonify({"error": "Failed to queue the action. Please try again later."}), 500
+
+@app.route('/login')
+async def login():
+    params = {
+        "client_id": DISCORD_CLIENT_ID,
+        "redirect_uri": DISCORD_REDIRECT_URI,
+        "response_type": "code",
+        "scope": "identify guilds"
+    }
+    return redirect(f"{DISCORD_API_BASE_URL}/oauth2/authorize?{urlencode(params)}")
+
+@app.route('/logout/<int:guild_id>')
+async def logout(guild_id: int):
+    session.clear() # Clears all session data
+    return redirect(url_for('panel_home', guild_id=guild_id))
+
+@app.route('/callback')
+async def callback():
+    code = request.args.get('code')
+    guild_id_to_check = session.get('login_redirect_guild_id')
+
+    if not code or not guild_id_to_check:
+        return redirect(url_for('home'))
+
+    data = {
+        "client_id": DISCORD_CLIENT_ID,
+        "client_secret": DISCORD_CLIENT_SECRET,
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": DISCORD_REDIRECT_URI,
+    }
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    
+    async with httpx.AsyncClient() as client:
+        token_response = await client.post(f"{DISCORD_API_BASE_URL}/oauth2/token", data=data, headers=headers)
+    
+    token_data = token_response.json()
+    access_token = token_data.get("access_token")
+
+    headers = {"Authorization": f"Bearer {access_token}"}
+    async with httpx.AsyncClient() as client:
+        user_response = await client.get(f"{DISCORD_API_BASE_URL}/users/@me", headers=headers)
+    
+    user_data = user_response.json()
+    user_id = int(user_data['id'])
+
+    # --- Start of Authorization Check ---
+    guild = app.bot_instance.get_guild(guild_id_to_check)
+    if not guild:
+        return "<h1>Error: The bot is not in the guild you're trying to access.</h1>", 403
+
+    member = guild.get_member(user_id)
+    if not member:
+        # The user is in the guild, but the bot's member cache might be incomplete.
+        # It's safer to deny access than to grant it incorrectly.
+        return await render_template("access_denied.html", guild_name=guild.name)
+
+    is_staff = await utils.has_mod_role(member)
+
+    if not is_staff:
+        return await render_template("access_denied.html", guild_name=guild.name)
+    # --- End of Authorization Check ---
+
+    # Store user info and authorization status in the session
+    session['user_id'] = user_data['id']
+    authorized_guilds = session.get('authorized_guilds', [])
+    if guild_id_to_check not in authorized_guilds:
+        authorized_guilds.append(guild_id_to_check)
+    session['authorized_guilds'] = authorized_guilds
+    
+    return redirect(url_for('panel_home', guild_id=guild_id_to_check))
+
 @app.route('/')
 async def home():
     return "Web server for LeClark Bot is active."
 
+# --- WEB ROUTES ---
+
 @app.route('/leaderboard/<int:guild_id>')
 async def xp_leaderboard(guild_id: int):
+    cache_key = f"leaderboard_{guild_id}"
+    current_time = time.time()
+    if cache_key in web_cache and (current_time - web_cache[cache_key]['timestamp']) < CACHE_EXPIRATION:
+        return web_cache[cache_key]['data']
     bot = app.bot_instance; guild = bot.get_guild(guild_id)
     if not guild: return await render_template("leaderboard.html", title="Error", guild_name="Unknown Server", users=[])
     raw_leaderboard = await database.get_leaderboard(guild_id, limit=100)
@@ -173,6 +447,7 @@ async def xp_leaderboard(guild_id: int):
     cosmetics_task = database.get_all_user_cosmetics(guild_id, user_ids)
     user_data_task = asyncio.gather(*[fetch_user_data(uid) for uid in user_ids])
     cosmetics, fetched_users = await asyncio.gather(cosmetics_task, user_data_task)
+    rendered_template = await render_template("leaderboard.html", title=f"XP Leaderboard - {guild.name}", guild_name=guild.name, guild_icon_url=guild.icon.url if guild.icon else None, users=users, score_name="XP")
     users = []
     for i, (user_id, xp) in enumerate(raw_leaderboard):
         user_info, (rank_name, _, _) = fetched_users[i], get_rank_info(xp)
@@ -183,6 +458,10 @@ async def xp_leaderboard(guild_id: int):
             "details": f"Level: {rank_name}",
             "emoji": cosmetics.get(user_id)
         })
+    web_cache[cache_key] = {
+        'data': rendered_template,
+        'timestamp': current_time
+    }
     return await render_template("leaderboard.html", title=f"XP Leaderboard - {guild.name}", guild_name=guild.name, guild_icon_url=guild.icon.url if guild.icon else None, users=users, score_name="XP")
 
 @app.route('/koth/<int:guild_id>')
@@ -435,3 +714,62 @@ async def api_user_search(guild_id: int):
     final_response.headers['Pragma'] = 'no-cache'
     final_response.headers['Expires'] = '0'
     return final_response
+
+# In web_server.py, add these routes after the existing API routes
+
+@app.route('/api/v1/actions/run-setup/<int:guild_id>', methods=['POST'])
+@login_required
+async def api_run_setup(guild_id: int):
+    """API endpoint to queue a setup command."""
+    form = await request.form
+    setup_type = form.get('setup_type')
+    
+    if not setup_type in ['verification', 'submission', 'report']:
+        return jsonify({"error": "Invalid setup type."}), 400
+
+    task = {
+        "action": "run_setup", "guild_id": guild_id,
+        "moderator_id": int(session.get('user_id')),
+        "setup_type": setup_type
+    }
+    app.bot_instance.action_queue.put_nowait(task)
+    return jsonify({"message": f"Setup command for '{setup_type}' queued successfully."}), 200
+
+@app.route('/api/v1/actions/send-message/<int:guild_id>', methods=['POST'])
+@login_required
+async def api_send_message(guild_id: int):
+    """API endpoint to queue sending a message."""
+    form = await request.form
+    task = {
+        "action": "send_message", "guild_id": guild_id,
+        "moderator_id": int(session.get('user_id')),
+        "channel_id": form.get('channel_id'),
+        "content": form.get('message_content'),
+        "is_embed": form.get('is_embed') == 'true'
+    }
+    if not task['channel_id'] or not task['content']:
+        return jsonify({"error": "Channel ID and Content are required."}), 400
+
+    app.bot_instance.action_queue.put_nowait(task)
+    return jsonify({"message": "Message queued successfully."}), 200
+
+@app.route('/api/v1/audit-log/<int:guild_id>')
+@login_required
+async def api_get_audit_log(guild_id: int):
+    """API endpoint to fetch the audit log."""
+    guild = app.bot_instance.get_guild(guild_id)
+    logs = []
+    try:
+        async for entry in guild.audit_logs(limit=25):
+            logs.append({
+                "user": str(entry.user),
+                "action": entry.action.name.replace('_', ' ').title(),
+                "target": str(entry.target) if entry.target else "N/A",
+                "reason": str(entry.reason) if entry.reason else "No reason provided."
+            })
+        return jsonify(logs)
+    except discord.Forbidden:
+        return jsonify({"error": "Bot lacks permission to view audit logs."}), 403
+    except Exception as e:
+        log.error(f"Failed to fetch audit log for guild {guild_id}: {e}")
+        return jsonify({"error": "An internal error occurred."}), 500

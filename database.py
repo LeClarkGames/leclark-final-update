@@ -96,8 +96,6 @@ async def initialize_database():
         if 'warning_limit' not in settings_columns: await cursor.execute("ALTER TABLE guild_settings ADD COLUMN warning_limit INTEGER DEFAULT 3")
         if 'warning_action' not in settings_columns: await cursor.execute("ALTER TABLE guild_settings ADD COLUMN warning_action TEXT DEFAULT 'mute'")
         if 'warning_action_duration' not in settings_columns: await cursor.execute("ALTER TABLE guild_settings ADD COLUMN warning_action_duration INTEGER DEFAULT 60")
-        if 'custom_role_cost' not in settings_columns: await cursor.execute("ALTER TABLE guild_settings ADD COLUMN custom_role_cost INTEGER DEFAULT 100")
-        if 'custom_role_divider_role_id' not in settings_columns: await cursor.execute("ALTER TABLE guild_settings ADD COLUMN custom_role_divider_role_id INTEGER")
         if 'submissions_system_enabled' not in settings_columns: 
             await cursor.execute("ALTER TABLE guild_settings ADD COLUMN submissions_system_enabled INTEGER DEFAULT 1")
         if 'temp_vc_system_enabled' not in settings_columns: 
@@ -135,9 +133,6 @@ async def initialize_database():
     await conn.commit()
     log.info("Database tables initialized/updated successfully.")
 
-    
-
-# --- (All other database functions are unchanged) ---
 # --- SETTINGS FUNCTIONS ---
 async def get_setting(guild_id, setting_name):
     conn = await get_db_connection()
@@ -650,9 +645,18 @@ async def get_all_tier_requirements(guild_id: int):
         rows = await cursor.fetchall()
         return {row[0]: {'messages_req': row[1], 'voice_hours_req': row[2]} for row in rows}
 
-async def create_tier_approval_request(guild_id, user_id, next_tier, token, message_id):
+async def create_or_update_tier_approval_request(guild_id, user_id, next_tier, token, message_id):
+    """Creates a new tier approval request or updates an existing one for a user."""
     conn = await get_db_connection()
-    await conn.execute("INSERT INTO tier_approval_requests (guild_id, user_id, next_tier, token, message_id) VALUES (?, ?, ?, ?, ?)", (guild_id, user_id, next_tier, token, message_id))
+    await conn.execute("""
+        INSERT INTO tier_approval_requests (guild_id, user_id, next_tier, token, message_id)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(guild_id, user_id) DO UPDATE SET
+            next_tier = excluded.next_tier,
+            token = excluded.token,
+            message_id = excluded.message_id,
+            created_at = CURRENT_TIMESTAMP
+    """, (guild_id, user_id, next_tier, token, message_id))
     await conn.commit()
 
 async def get_tier_approval_request(guild_id, user_id):

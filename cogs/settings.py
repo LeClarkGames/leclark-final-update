@@ -458,15 +458,18 @@ class TierSystemSettingsView(BaseSettingsView):
         roles = await database.get_all_tier_roles(guild.id)
         reqs = await database.get_all_tier_requirements(guild.id)
 
-        for i in range(1, 5):
+        for i in range(4, 0, -1): # Loop from 4 down to 1 for clarity
             role_mention = f"<@&{roles.get(i)}>" if roles.get(i) else "Not Set"
-            if i == 1:
+            
+            # --- MODIFIED TEXT ---
+            if i == 4:
                 req_text = "Base tier for all new members."
             else:
                 tier_req = reqs.get(i, {})
                 msg_req = tier_req.get('messages_req', 'N/A')
                 vc_req = tier_req.get('voice_hours_req', 'N/A')
-                req_text = f"Requires: `{msg_req}` messages & `{vc_req}` voice hours."
+                req_text = f"Requires: `{msg_req}` messages & `{vc_req}` voice hours to be promoted from Tier {i+1}."
+            # --- END MODIFIED TEXT ---
             
             embed.add_field(name=f"Tier {i} Role: {role_mention}", value=req_text, inline=False)
         return embed
@@ -497,23 +500,27 @@ class TierRequirementModal(discord.ui.Modal, title="Set Tier Requirements"):
     def __init__(self, parent_view: TierSystemSettingsView):
         super().__init__()
         self.parent_view = parent_view
-        self.tier_level = discord.ui.TextInput(label="Tier to set requirements for (2-4)", placeholder="e.g., 2")
+        # --- MODIFIED TEXT ---
+        self.tier_level = discord.ui.TextInput(label="Tier to Set Requirements For (1-3)", placeholder="e.g., 2 (for promotion from T3 to T2)")
         self.message_req = discord.ui.TextInput(label="Message Count Required", placeholder="e.g., 500")
         self.voice_req = discord.ui.TextInput(label="Voice Hours Required", placeholder="e.g., 10")
+        # --- END MODIFIED TEXT ---
         self.add_item(self.tier_level)
         self.add_item(self.message_req)
         self.add_item(self.voice_req)
     
     async def on_submit(self, interaction: discord.Interaction):
         try:
-            tier = int(self.tier_level.value); assert 2 <= tier <= 4
+            # --- MODIFIED LOGIC ---
+            tier = int(self.tier_level.value); assert 1 <= tier <= 3
             messages = int(self.message_req.value); assert messages >= 0
             voice = int(self.voice_req.value); assert voice >= 0
+            # --- END MODIFIED LOGIC ---
         except (ValueError, AssertionError):
-            return await interaction.response.send_message("Invalid input. Please check the numbers.", ephemeral=True)
+            return await interaction.response.send_message("Invalid input. Tier must be 1-3. Other values must be positive numbers.", ephemeral=True)
         
         await database.set_tier_requirement(interaction.guild.id, tier, messages, voice)
-        await interaction.response.send_message(f"✅ Requirements for Tier {tier} updated.", ephemeral=True)
+        await interaction.response.send_message(f"✅ Requirements to get into Tier {tier} updated.", ephemeral=True)
         await self.parent_view.refresh_and_show(interaction, edit_original=True)
 
 class SettingsMainView(BaseSettingsView):

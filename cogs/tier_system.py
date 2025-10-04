@@ -74,8 +74,6 @@ class TierSystemCog(commands.Cog, name="Tier System"):
                 await database.update_channel_activity(guild_id, user_id, before.channel.id, voice_seconds=duration_seconds)
                 del self.voice_activity[guild_id][user_id]
 
-    # --- Background Tasks ---
-
     @tasks.loop(minutes=1)
     async def activity_check_loop(self):
         log.info("Running periodic activity check for tier upgrades...")
@@ -85,22 +83,28 @@ class TierSystemCog(commands.Cog, name="Tier System"):
                 continue
 
             tier_roles = await database.get_all_tier_roles(guild.id)
-            tier4_role_id = tier_roles.get(4) # Check for the lowest tier role
+            if not tier_roles: continue # Skip if no tier roles are configured
 
             for member in guild.members:
                 if member.bot: continue
 
                 current_tier = await database.get_user_tier(guild.id, member.id)
 
+                # --- MODIFIED LOGIC FOR ENROLLMENT ---
                 if current_tier is None:
-                    # Enroll existing members if they have the base role but aren't in the DB
-                    if tier4_role_id and any(role.id == tier4_role_id for role in member.roles):
-                        await database.set_user_tier(guild.id, member.id, 4)
-                        current_tier = 4
-                        log.info(f"Automatically enrolled existing member {member.name} into the tier system at Tier 4.")
-                    else:
-                        # If they have no tier role, we don't track them for promotion
+                    # Check if the member has any of the configured tier roles
+                    member_role_ids = {role.id for role in member.roles}
+                    for tier_level, role_id in tier_roles.items():
+                        if role_id in member_role_ids:
+                            await database.set_user_tier(guild.id, member.id, tier_level)
+                            current_tier = tier_level
+                            log.info(f"Automatically enrolled existing member {member.name} into the tier system at Tier {tier_level}.")
+                            break # Enroll at the highest tier they have and stop checking
+                    
+                    # If after checking all tier roles, they still have no tier, skip them
+                    if current_tier is None:
                         continue
+                # --- END OF MODIFIED LOGIC ---
 
                 # Check if user is already at the highest tier (Tier 1)
                 if current_tier <= 1:
@@ -127,10 +131,7 @@ class TierSystemCog(commands.Cog, name="Tier System"):
                     log_channel = guild.get_channel(log_channel_id)
                     if not log_channel: continue
 
-                    # --- Start of new/modified code ---
                     token = secrets.token_urlsafe(16)
-
-                    # Create the view and embed first
                     embed = discord.Embed(
                         title="✨ Tier Upgrade Recommendation",
                         description=f"{member.mention} is eligible to be promoted to **Tier {next_tier}**.",
@@ -139,16 +140,10 @@ class TierSystemCog(commands.Cog, name="Tier System"):
                     embed.add_field(name="Current Tier", value=f"`{current_tier}`", inline=True)
                     embed.add_field(name="Recommended Tier", value=f"`{next_tier}`", inline=True)
                     embed.set_footer(text=f"User ID: {member.id}")
-
                     view = TierApprovalView(self.bot, guild.id, member.id, next_tier, token)
-                    
-                    # Send the message to get the message ID
                     message = await log_channel.send(embed=embed, view=view)
-                    
-                    # NOW, save everything to the database in one atomic operation
                     await database.create_or_update_tier_approval_request(guild.id, member.id, next_tier, token, message.id)
                     log.info(f"Created/updated tier upgrade request for {member.name} in {guild.name}.")
-                    # --- End of new/modified code ---
     
     @activity_check_loop.before_loop
     async def before_activity_check_loop(self):

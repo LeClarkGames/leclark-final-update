@@ -102,17 +102,23 @@ class ReportingCog(commands.Cog, name="Reporting"):
     @app_commands.guild_only()
     @utils.has_permission("admin")
     async def setup_report(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
         report_channel_id = await database.get_setting(interaction.guild.id, 'report_channel_id')
-        if not report_channel_id: return await interaction.response.send_message("❌ Report channel not set. Use `/settings report_channel` first.", ephemeral=True)
+        if not report_channel_id:
+            return await interaction.followup.send("❌ Report channel not set. Use `/settings report_channel` first.", ephemeral=True)
+        
         report_channel = self.bot.get_channel(report_channel_id)
-        if not report_channel: return await interaction.response.send_message("❌ Could not find the configured report channel.", ephemeral=True)
+        if not report_channel:
+            return await interaction.followup.send("❌ Could not find the configured report channel.", ephemeral=True)
+            
         embed = discord.Embed(title="📝 Report a Rule-Breaker", description="If you see a message that violates our server rules, click the button below.", color=config.BOT_CONFIG["EMBED_COLORS"]["INFO"])
         view = ReportTriggerView(bot=self.bot)
+        
         try:
             await report_channel.send(embed=embed, view=view)
-            await interaction.response.send_message(f"✅ Report button sent to {report_channel.mention}.", ephemeral=True)
+            await interaction.followup.send(f"✅ Report button sent to {report_channel.mention}.", ephemeral=True)
         except discord.Forbidden:
-            await interaction.response.send_message(f"❌ I don't have permission to send messages in {report_channel.mention}.", ephemeral=True)
-
+            await interaction.followup.send(f"❌ I don't have permission to send messages in {report_channel.mention}.", ephemeral=True)
 async def setup(bot: commands.Bot):
     await bot.add_cog(ReportingCog(bot))

@@ -90,6 +90,12 @@ async def initialize_database():
         # --- Schema Updates ---
         await cursor.execute("PRAGMA table_info(guild_settings)")
         settings_columns = [row[1] for row in await cursor.fetchall()]
+
+        await cursor.execute("PRAGMA table_info(channel_activity)")
+        activity_columns = [row[1] for row in await cursor.fetchall()]
+        if 'last_updated' not in activity_columns:
+            await cursor.execute("ALTER TABLE channel_activity ADD COLUMN last_updated TIMESTAMP")
+
         if 'koth_king_id' not in settings_columns: await cursor.execute("ALTER TABLE guild_settings ADD COLUMN koth_king_id INTEGER")
         if 'koth_king_submission_id' not in settings_columns: await cursor.execute("ALTER TABLE guild_settings ADD COLUMN koth_king_submission_id INTEGER")
         if 'koth_tiebreaker_users' not in settings_columns: await cursor.execute("ALTER TABLE guild_settings ADD COLUMN koth_tiebreaker_users TEXT")
@@ -686,16 +692,15 @@ async def get_all_tier_roles(guild_id: int):
         3: settings.get('tier3_role_id'), 4: settings.get('tier4_role_id')
     }
 
-# --- DASHBOARD & DETAILED STATS FUNCTIONS ---
-
 async def update_channel_activity(guild_id: int, user_id: int, channel_id: int, message_count: int = 0, voice_seconds: int = 0):
     conn = await get_db_connection()
     await conn.execute("""
-        INSERT INTO channel_activity (guild_id, user_id, channel_id, message_count, voice_seconds)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO channel_activity (guild_id, user_id, channel_id, message_count, voice_seconds, last_updated)
+        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT(guild_id, user_id, channel_id) DO UPDATE SET
         message_count = message_count + excluded.message_count,
-        voice_seconds = voice_seconds + excluded.voice_seconds
+        voice_seconds = voice_seconds + excluded.voice_seconds,
+        last_updated = CURRENT_TIMESTAMP
     """, (guild_id, user_id, channel_id, message_count, voice_seconds))
     await conn.commit()
 
@@ -731,3 +736,30 @@ async def get_top_voice_channels(guild_id: int, limit: int = 5):
     async with conn.cursor() as cursor:
         await cursor.execute("SELECT channel_id, SUM(voice_seconds) as total_voice FROM channel_activity WHERE guild_id = ? GROUP BY channel_id ORDER BY total_voice DESC LIMIT ?", (guild_id, limit))
         return await cursor.fetchall()
+    
+async def get_top_users_today(guild_id: int, limit: int = 5):
+    """Gets top users by activity in the last 24 hours."""
+    conn = await get_db_connection()
+    async with conn.cursor() as cursor:
+        await cursor.execute("""
+            SELECT user_id, SUM(message_count), SUM(voice_seconds) 
+            FROM channel_activity 
+            WHERE guild_id = ? AND last_updated >= datetime('now', '-1 day')
+            GROUP BY user_id 
+            ORDER BY SUM(message_count) DESC, SUM(voice_seconds) DESC 
+            LIMIT ?
+        """, (guild_id, limit))
+        return await cursor.fetchall()
+    
+async def get_all_pending_tier_requests(guild_id: int):
+    """Gets all pending tier approval requests for a guild."""
+    conn = await get_db_connection()
+    async with conn.cursor() as cursor:
+        await cursor.execute("""
+            SELECT user_id, next_tier, token, message_id 
+            FROM tier_approval_requests 
+            WHERE guild_id = ? 
+            ORDER BY created_at ASC
+        """, (guild_id,))
+        rows = await cursor.fetchall()
+        return [{'user_id': r[0], 'next_tier': r[1], 'token': r[2], 'message_id': r[3]} for r in rows]

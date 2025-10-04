@@ -262,11 +262,18 @@ async def panel_statistics(guild_id: int):
     guild = app.bot_instance.get_guild(guild_id)
     user_info = await fetch_user_data(int(session.get('user_id')))
     access_level = await get_user_access_level(guild, int(session.get('user_id')))
+    top_voice_raw = await database.get_top_voice_channels(guild_id, limit=5)
 
     # Fetch data for stats cards
     top_users_raw = await database.get_top_users_overall(guild_id, limit=10)
     top_text_raw = await database.get_top_text_channels(guild_id, limit=5)
     top_voice_raw = await database.get_top_voice_channels(guild_id, limit=5)
+
+    top_today_raw = await database.get_top_users_today(guild_id, limit=5)
+    top_today = []
+    for user_id_today, msg_count_today, vc_sec_today in top_today_raw:
+        user_info_today = await fetch_user_data(user_id_today)
+        top_today.append({'name': user_info_today['name'], 'message_count': msg_count_today, 'voice_seconds': vc_sec_today})
 
     top_users = []
     for user_id_stats, msg_count, vc_sec in top_users_raw:
@@ -292,6 +299,7 @@ async def panel_statistics(guild_id: int):
         guild_id=guild_id, guild_name=guild.name, guild_icon_url=guild.icon.url if guild.icon else None,
         user_name=user_info['name'], user_avatar_url=user_info['avatar_url'],
         top_users=top_users, top_text_channels=top_text, top_voice_channels=top_voice,
+        top_active_today=top_today,
         access_level=access_level
     )
 
@@ -324,11 +332,55 @@ async def panel_mod_menu(guild_id: int):
     user_info = await fetch_user_data(int(session.get('user_id')))
     access_level = await get_user_access_level(guild, int(session.get('user_id')))
 
+    admin_role_ids = await utils.get_admin_roles(guild_id)
+    mod_role_ids = await utils.get_mod_roles(guild_id)
+
+    admin_members = []
+    mod_members = []
+    for member in guild.members:
+        if member.bot: continue
+        member_role_ids = {role.id for role in member.roles}
+        if any(role_id in member_role_ids for role_id in admin_role_ids):
+            admin_members.append({"name": member.display_name, "avatar_url": member.display_avatar.url})
+        elif any(role_id in member_role_ids for role_id in mod_role_ids):
+            mod_members.append({"name": member.display_name, "avatar_url": member.display_avatar.url})
+
     return await render_template(
         "panel_mod_menu.html",
         guild_id=guild_id, guild_name=guild.name, guild_icon_url=guild.icon.url if guild.icon else None,
         user_name=user_info['name'], user_avatar_url=user_info['avatar_url'],
-        access_level=access_level
+        access_level=access_level,
+        admin_members=admin_members,
+        mod_members=mod_members
+    )
+
+@app.route('/panel/<int:guild_id>/tiers')
+@login_required
+async def panel_tiers(guild_id: int):
+    """Renders the tier management page."""
+    guild = app.bot_instance.get_guild(guild_id)
+    user_info = await fetch_user_data(int(session.get('user_id')))
+    access_level = await get_user_access_level(guild, int(session.get('user_id')))
+
+    pending_requests_raw = await database.get_all_pending_tier_requests(guild_id)
+    
+    pending_requests = []
+    for req in pending_requests_raw:
+        user_data = await fetch_user_data(req['user_id'])
+        pending_requests.append({
+            'user_id': req['user_id'],
+            'user_name': user_data['name'],
+            'user_avatar_url': user_data['avatar_url'],
+            'next_tier': req['next_tier'],
+            'token': req['token']
+        })
+
+    return await render_template(
+        "panel_tiers.html",
+        guild_id=guild_id, guild_name=guild.name, guild_icon_url=guild.icon.url if guild.icon else None,
+        user_name=user_info['name'], user_avatar_url=user_info['avatar_url'],
+        access_level=access_level,
+        requests=pending_requests
     )
 
 @app.route('/api/v1/actions/moderate/<int:guild_id>', methods=['POST'])
@@ -432,37 +484,57 @@ async def callback():
 async def home():
     return "Web server for LeClark Bot is active."
 
-# --- WEB ROUTES ---
-
 @app.route('/leaderboard/<int:guild_id>')
 async def xp_leaderboard(guild_id: int):
     cache_key = f"leaderboard_{guild_id}"
     current_time = time.time()
     if cache_key in web_cache and (current_time - web_cache[cache_key]['timestamp']) < CACHE_EXPIRATION:
         return web_cache[cache_key]['data']
-    bot = app.bot_instance; guild = bot.get_guild(guild_id)
-    if not guild: return await render_template("leaderboard.html", title="Error", guild_name="Unknown Server", users=[])
+        
+    bot = app.bot_instance
+    guild = bot.get_guild(guild_id)
+    if not guild: 
+        return await render_template("leaderboard.html", title="Error", guild_name="Unknown Server", users=[])
+
     raw_leaderboard = await database.get_leaderboard(guild_id, limit=100)
-    user_ids = [user_id for user_id, xp in raw_leaderboard]
-    cosmetics_task = database.get_all_user_cosmetics(guild_id, user_ids)
-    user_data_task = asyncio.gather(*[fetch_user_data(uid) for uid in user_ids])
-    cosmetics, fetched_users = await asyncio.gather(cosmetics_task, user_data_task)
-    rendered_template = await render_template("leaderboard.html", title=f"XP Leaderboard - {guild.name}", guild_name=guild.name, guild_icon_url=guild.icon.url if guild.icon else None, users=users, score_name="XP")
-    users = []
-    for i, (user_id, xp) in enumerate(raw_leaderboard):
-        user_info, (rank_name, _, _) = fetched_users[i], get_rank_info(xp)
-        users.append({
-            "name": user_info['name'],
-            "avatar_url": user_info['avatar_url'],
-            "score": xp,
-            "details": f"Level: {rank_name}",
-            "emoji": cosmetics.get(user_id)
-        })
+    
+    # --- FIX STARTS HERE ---
+    
+    users = [] # Initialize the list first
+    if raw_leaderboard: # Only proceed if there's data
+        user_ids = [user_id for user_id, xp in raw_leaderboard]
+        cosmetics_task = database.get_all_user_cosmetics(guild_id, user_ids)
+        user_data_task = asyncio.gather(*[fetch_user_data(uid) for uid in user_ids])
+        cosmetics, fetched_users = await asyncio.gather(cosmetics_task, user_data_task)
+        
+        for i, (user_id, xp) in enumerate(raw_leaderboard):
+            user_info = fetched_users[i]
+            rank_name, _, _ = get_rank_info(xp)
+            users.append({
+                "name": user_info['name'],
+                "avatar_url": user_info['avatar_url'],
+                "score": xp,
+                "details": f"Level: {rank_name}",
+                "emoji": cosmetics.get(user_id)
+            })
+
+    # Now, we can safely render the template
+    rendered_template = await render_template(
+        "leaderboard.html", 
+        title=f"XP Leaderboard - {guild.name}", 
+        guild_name=guild.name, 
+        guild_icon_url=guild.icon.url if guild.icon else None, 
+        users=users, 
+        score_name="XP"
+    )
+
     web_cache[cache_key] = {
         'data': rendered_template,
         'timestamp': current_time
     }
-    return await render_template("leaderboard.html", title=f"XP Leaderboard - {guild.name}", guild_name=guild.name, guild_icon_url=guild.icon.url if guild.icon else None, users=users, score_name="XP")
+    
+    return rendered_template
+    # --- FIX ENDS HERE ---
 
 @app.route('/koth/<int:guild_id>')
 async def koth_leaderboard(guild_id: int):
@@ -586,6 +658,7 @@ async def user_activity_page(guild_id: int, user_id: int):
 
     return await render_template(
         "user_activity.html",
+        guild_id=guild_id,
         user=user_data,
         activity=activity_data,
         request=request_data,
@@ -773,3 +846,29 @@ async def api_get_audit_log(guild_id: int):
     except Exception as e:
         log.error(f"Failed to fetch audit log for guild {guild_id}: {e}")
         return jsonify({"error": "An internal error occurred."}), 500
+    
+@app.route('/api/v1/actions/manage-staff/<int:guild_id>', methods=['POST'])
+@login_required
+async def api_manage_staff(guild_id: int):
+    """API endpoint to add or remove a staff role from a user."""
+    form = await request.form
+    # Ensure the user making the request is an Admin
+    guild = app.bot_instance.get_guild(guild_id)
+    moderator = guild.get_member(int(session.get('user_id')))
+    if not await utils.has_admin_role(moderator):
+        return jsonify({"error": "You must be a Bot Admin to perform this action."}), 403
+
+    task = {
+        "action": "manage_staff",
+        "guild_id": guild_id,
+        "moderator_id": int(session.get('user_id')),
+        "target_id": form.get('target_id'),
+        "role_type": form.get('role_type'), # 'admin' or 'mod'
+        "role_action": form.get('role_action') # 'add' or 'remove'
+    }
+
+    if not all(k in task for k in ['target_id', 'role_type', 'role_action']):
+        return jsonify({"error": "Missing required fields."}), 400
+
+    app.bot_instance.action_queue.put_nowait(task)
+    return jsonify({"message": f"Staff role {task['role_action']} action queued successfully."}), 200

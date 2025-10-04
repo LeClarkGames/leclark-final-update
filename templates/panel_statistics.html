@@ -6,6 +6,13 @@
     <title>{{ guild_name }} - Statistics</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <style>
+        body {
+            align-items: flex-start;
+            padding-top: 4rem;
+        }
+        .main-content {
+            min-height: 60vh;
+        }
         .panel-container { display: flex; gap: 2rem; width: 100%; max-width: 1400px; }
         .sidebar { flex: 0 0 200px; background: var(--primary-ui-color); border-radius: 4px; padding: 1rem; border: 1px solid var(--border-color); }
         .sidebar a { display: block; padding: 1rem; text-decoration: none; color: var(--text-color); border-radius: 4px; font-weight: 700; text-transform: uppercase; margin-bottom: 0.5rem; }
@@ -28,6 +35,7 @@
             <a href="{{ url_for('panel_statistics', guild_id=guild_id) }}">Statistics</a>
             <a href="{{ url_for('panel_widgets', guild_id=guild_id) }}">Widgets</a>
             <a href="{{ url_for('panel_mod_menu', guild_id=guild_id) }}">Mod Menu</a>
+            <a href="{{ url_for('panel_tiers', guild_id=guild_id) }}">Tiers</a>
         </aside>
         <main class="main-content">
             <div class="header-bar">
@@ -84,10 +92,14 @@
                         {% endfor %}
                     </ul>
                 </div>
-                 <div class="card">
+                <div class="card">
                     <h3>Most Active (Today)</h3>
                     <ul class="stat-list">
-                        <li>Coming soon...</li>
+                        {% for user in top_active_today %}
+                        <li>{{ user.name }}<span>{{ "%.1f"|format(user.voice_seconds / 3600) }} hrs</span></li>
+                        {% else %}
+                        <li>No activity recorded yet.</li>
+                        {% endfor %}
                     </ul>
                 </div>
             </div>

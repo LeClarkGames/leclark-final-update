@@ -6,6 +6,8 @@
     <title>{{ guild_name }} - Mod Menu</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <style>
+        body { align-items: flex-start; padding-top: 4rem; }
+        .main-content { min-height: 60vh; }
         .panel-container { display: flex; gap: 2rem; width: 100%; max-width: 1400px; }
         .sidebar { flex: 0 0 200px; background: var(--primary-ui-color); border-radius: 4px; padding: 1rem; border: 1px solid var(--border-color); }
         .sidebar a { display: block; padding: 1rem; text-decoration: none; color: var(--text-color); border-radius: 4px; font-weight: 700; text-transform: uppercase; margin-bottom: 0.5rem; }
@@ -18,17 +20,15 @@
         .form-group { display: flex; flex-direction: column; text-align: left; }
         .form-group label { margin-bottom: 0.5rem; font-weight: 700; }
         .form-group input, .form-group select, .form-group textarea { width: 100%; }
-        .dashboard-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5rem; }
         #response-message { margin-top: 1rem; text-align: center; font-weight: 700; }
-        
-        /* Modal Styles */
         .modal { display: none; position: fixed; z-index: 100; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.6); }
         .modal-content { background-color: var(--primary-ui-color); margin: 15% auto; padding: 20px; border: 1px solid var(--border-color); width: 80%; max-width: 500px; border-radius: 4px; }
         .close-button { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }
-        
-        /* Audit Log Styles */
         .audit-log-entry { padding: 8px 0; border-bottom: 1px solid #2a2a33; }
         .audit-log-entry:last-child { border-bottom: none; }
+        .staff-list { list-style: none; padding: 0; text-align: left; }
+        .staff-list li { display: flex; align-items: center; gap: 10px; padding: 5px 0; }
+        .staff-list img { width: 30px; height: 30px; border-radius: 50%; }
     </style>
 </head>
 <body>
@@ -42,6 +42,7 @@
             <a href="{{ url_for('panel_statistics', guild_id=guild_id) }}">Statistics</a>
             <a href="{{ url_for('panel_widgets', guild_id=guild_id) }}">Widgets</a>
             <a href="{{ url_for('panel_mod_menu', guild_id=guild_id) }}">Mod Menu</a>
+            <a href="{{ url_for('panel_tiers', guild_id=guild_id) }}">Tiers</a>
         </aside>
         <main class="main-content">
             <div class="header-bar">
@@ -115,6 +116,45 @@
                     </div>
                     <button id="load-audit-log" class="button" style="margin-top: 1rem;">Load Audit Log</button>
                 </div>
+                
+                {% if access_level == 'Admin' %}
+                <div class="card" style="grid-column: 1 / -1;">
+                    <h3>Staff Management</h3>
+                    <p class="subtitle">Assigns the first configured Admin/Mod role from the bot's settings.</p>
+                    <div class="form-grid" style="margin-top: 1.5rem;">
+                        <div>
+                            <h4>Current Staff</h4>
+                            <ul class="staff-list">
+                                {% for member in admin_members %}
+                                <li><img src="{{ member.avatar_url }}"><span>{{ member.name }} (Admin)</span></li>
+                                {% endfor %}
+                                {% for member in mod_members %}
+                                <li><img src="{{ member.avatar_url }}"><span>{{ member.name }} (Mod)</span></li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                        <div>
+                            <h4>Manage Staff Member</h4>
+                            <div class="form-group">
+                                <label for="staff_target_id">User ID</label>
+                                <input type="text" id="staff_target_id" class="input">
+                            </div>
+                            <div class="form-group">
+                                <label for="staff_role_type">Role Type</label>
+                                <select id="staff_role_type" class="input">
+                                    <option value="mod">Moderator</option>
+                                    <option value="admin">Admin</option>
+                                </select>
+                            </div>
+                            <div class="staff-actions">
+                                <button id="add-staff-btn" class="button">Add</button>
+                                <button id="remove-staff-btn" class="button" style="background-color: var(--accent-color);">Remove</button>
+                            </div>
+                            <div id="staff-response"></div>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
             </div>
         </main>
     </div>
@@ -138,21 +178,39 @@
     </div>
     
     <script>
-        // --- All JavaScript for the page ---
         const guildId = '{{ guild_id }}';
-
-        // Helper to show API responses
         function showResponse(elementId, message, isError = false) {
             const el = document.getElementById(elementId);
             el.textContent = message;
             el.style.color = isError ? 'var(--accent-color)' : '#57F287';
         }
-
-        // 1. Moderation Action Modal Logic
         const modModal = document.getElementById('mod-modal');
         const takeActionBtn = document.getElementById('take-action-btn');
         const closeBtn = document.querySelector('.close-button');
-        
+        // --- NEW STAFF MANAGEMENT SCRIPT ---
+        const addStaffBtn = document.getElementById('add-staff-btn');
+        const removeStaffBtn = document.getElementById('remove-staff-btn');
+
+        const handleStaffAction = async (action) => {
+            const formData = new FormData();
+            formData.append('target_id', document.getElementById('staff_target_id').value);
+            formData.append('role_type', document.getElementById('staff_role_type').value);
+            formData.append('role_action', action);
+
+            const response = await fetch(`/api/v1/actions/manage-staff/${guildId}`, { method: 'POST', body: formData });
+            const result = await response.json();
+            showResponse('staff-response', result.message || result.error, !response.ok);
+            if(response.ok) {
+                // Optionally, refresh the page to see the updated staff list
+                setTimeout(() => window.location.reload(), 1500);
+            }
+        };
+
+        if (addStaffBtn && removeStaffBtn) {
+            addStaffBtn.addEventListener('click', () => handleStaffAction('add'));
+            removeStaffBtn.addEventListener('click', () => handleStaffAction('remove'));
+        }
+
         takeActionBtn.onclick = () => {
             const action = document.getElementById('mod_action').value;
             document.getElementById('modal-title').textContent = `${action.charAt(0).toUpperCase() + action.slice(1)} User`;
@@ -161,7 +219,6 @@
         };
         closeBtn.onclick = () => modModal.style.display = 'none';
         window.onclick = (event) => { if (event.target == modModal) modModal.style.display = 'none'; };
-
         document.getElementById('mod-modal-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             const formData = new FormData();
@@ -169,14 +226,11 @@
             formData.append('mod_action', document.getElementById('mod_action').value);
             formData.append('duration', document.getElementById('duration').value);
             formData.append('reason', document.getElementById('reason').value);
-
             const response = await fetch(`/api/v1/actions/moderate/${guildId}`, { method: 'POST', body: formData });
             const result = await response.json();
             showResponse('mod-response', result.message || result.error, !response.ok);
             if (response.ok) modModal.style.display = 'none';
         });
-
-        // 2. Setup Buttons Logic
         document.querySelectorAll('.setup-btn').forEach(button => {
             button.addEventListener('click', async () => {
                 const setupType = button.dataset.setup;
@@ -187,8 +241,6 @@
                 showResponse('setup-response', result.message || result.error, !response.ok);
             });
         });
-
-        // 3. Send Message Logic
         document.getElementById('send-message-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             const formData = new FormData(e.target);
@@ -196,8 +248,6 @@
             const result = await response.json();
             showResponse('send-response', result.message || result.error, !response.ok);
         });
-
-        // 4. Audit Log Logic
         document.getElementById('load-audit-log').addEventListener('click', async () => {
             const contentDiv = document.getElementById('audit-log-content');
             contentDiv.innerHTML = '<p>Loading logs...</p>';

@@ -5,6 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>User Activity for {{ user.name }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        .actions-container {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1.5rem;
+        }
+    </style>
 </head>
 <body>
     <div class="container" style="max-width: 650px;">
@@ -37,12 +44,15 @@
                 </div>
             </div>
 
-            <form action="/approve_tier_up" method="post">
-                <input type="hidden" name="token" value="{{ request.token }}">
-                <input type="hidden" name="approver_name" value="{{ approver_name }}">
-                <button type="submit" class="button approve-btn">Approve Upgrade to Tier {{ request.next_tier }}</button>
-            </form>
-        </div>
+            <div class="actions-container">
+                <a href="{{ url_for('panel_tiers', guild_id=guild_id) }}" class="button" style="background-color: transparent;">Back to Tiers List</a>
+                <form action="/approve_tier_up" method="post" style="width: 100%;">
+                    <input type="hidden" name="token" value="{{ request.token }}">
+                    <input type="hidden" name="approver_name" value="{{ approver_name }}">
+                    <button type="submit" class="button approve-btn">Approve Upgrade to Tier {{ request.next_tier }}</button>
+                </form>
+            </div>
+            </div>
     </div>
 </body>
 </html>

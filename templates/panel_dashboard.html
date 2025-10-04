@@ -6,6 +6,13 @@
     <title>{{ guild_name }} - Staff Panel</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <style>
+        body {
+            align-items: flex-start;
+            padding-top: 4rem;
+        }
+        .main-content {
+            min-height: 60vh;
+        }
         .panel-container { display: flex; gap: 2rem; width: 100%; max-width: 1400px; }
         .sidebar { flex: 0 0 200px; background: var(--primary-ui-color); border-radius: 4px; padding: 1rem; border: 1px solid var(--border-color); }
         .sidebar a { display: block; padding: 1rem; text-decoration: none; color: var(--text-color); border-radius: 4px; font-weight: 700; text-transform: uppercase; margin-bottom: 0.5rem; }
@@ -30,6 +37,7 @@
             <a href="{{ url_for('panel_statistics', guild_id=guild_id) }}">Statistics</a>
             <a href="{{ url_for('panel_widgets', guild_id=guild_id) }}">Widgets</a>
             <a href="{{ url_for('panel_mod_menu', guild_id=guild_id) }}">Mod Menu</a>
+            <a href="{{ url_for('panel_tiers', guild_id=guild_id) }}">Tiers</a>
         </aside>
         <main class="main-content">
             <div class="header-bar">

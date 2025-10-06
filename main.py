@@ -22,7 +22,7 @@ from cogs.submissions import (
 # --- END ADD ---
 
 load_dotenv()
-TOKEN = os.getenv("BOT_TOKEN_MAIN")
+TOKEN = os.getenv("BOT_TOKEN_TEST")
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] [%(levelname)-8s] %(name)-12s: %(message)s", datefmt="%Y-m-d %H:%M:%S")
 log = logging.getLogger(__name__)
@@ -58,7 +58,7 @@ class MyBot(commands.Bot):
             "cogs.verification", "cogs.reaction_roles", "cogs.reporting",
             "cogs.temp_vc", "cogs.submissions", "cogs.tasks", "cogs.ranking",
             "cogs.shop", "cogs.utility", "cogs.inventory", "cogs.customize",
-            "cogs.tier_system", "cogs.panel_handler"
+            "cogs.tier_system", "cogs.panel_handler", "cogs.giveaway"
         ]
         for cog in cogs_to_load:
             try:

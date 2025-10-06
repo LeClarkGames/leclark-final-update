@@ -383,6 +383,30 @@ async def panel_tiers(guild_id: int):
         requests=pending_requests
     )
 
+@app.route('/panel/<int:guild_id>/giveaway')
+@login_required
+async def panel_giveaway(guild_id: int):
+    """Renders the giveaway management page."""
+    guild = app.bot_instance.get_guild(guild_id)
+    user_info = await fetch_user_data(int(session.get('user_id')))
+    access_level = await get_user_access_level(guild, int(session.get('user_id')))
+
+    giveaway = await database.get_active_giveaway(guild_id)
+    entrants = []
+    if giveaway:
+        entrant_ids = await database.get_giveaway_entrants(guild_id, giveaway['id'])
+        for user_id in entrant_ids:
+            entrants.append(await fetch_user_data(user_id))
+
+    return await render_template(
+        "panel_giveaway.html",
+        guild_id=guild_id, guild_name=guild.name, guild_icon_url=guild.icon.url if guild.icon else None,
+        user_name=user_info['name'], user_avatar_url=user_info['avatar_url'],
+        access_level=access_level,
+        giveaway=giveaway,
+        entrants=entrants
+    )
+
 @app.route('/api/v1/actions/moderate/<int:guild_id>', methods=['POST'])
 @login_required
 async def api_moderate_user(guild_id: int):

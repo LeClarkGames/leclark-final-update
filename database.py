@@ -71,6 +71,28 @@ async def initialize_database():
                 PRIMARY KEY (guild_id, user_id)
             )
         """)
+        await cursor.execute("""
+            CREATE TABLE IF NOT EXISTS giveaways (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                description TEXT,
+                start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                end_time TIMESTAMP,
+                winner_id INTEGER,
+                is_active BOOLEAN DEFAULT 1,
+                message_id INTEGER
+            )
+        """)
+        await cursor.execute("""
+            CREATE TABLE IF NOT EXISTS giveaway_entrants (
+                giveaway_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                guild_id INTEGER NOT NULL,
+                entry_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (giveaway_id, user_id, guild_id)
+            )
+        """)
         await cursor.execute("CREATE TABLE IF NOT EXISTS warnings (warning_id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER NOT NULL, user_id INTEGER NOT NULL, moderator_id INTEGER NOT NULL, reason TEXT, issued_at TIMESTAMP NOT NULL, log_message_id INTEGER)")
         await cursor.execute("CREATE TABLE IF NOT EXISTS reaction_roles (message_id INTEGER NOT NULL, emoji TEXT NOT NULL, role_id INTEGER NOT NULL, guild_id INTEGER NOT NULL, PRIMARY KEY (message_id, emoji))")
         await cursor.execute("CREATE TABLE IF NOT EXISTS temporary_vcs (channel_id INTEGER PRIMARY KEY, owner_id INTEGER NOT NULL, text_channel_id INTEGER)")
@@ -135,6 +157,7 @@ async def initialize_database():
         if 'tier2_role_id' not in settings_columns: await cursor.execute("ALTER TABLE guild_settings ADD COLUMN tier2_role_id INTEGER")
         if 'tier3_role_id' not in settings_columns: await cursor.execute("ALTER TABLE guild_settings ADD COLUMN tier3_role_id INTEGER")
         if 'tier4_role_id' not in settings_columns: await cursor.execute("ALTER TABLE guild_settings ADD COLUMN tier4_role_id INTEGER")
+        if 'giveaway_youtube_channel_id' not in settings_columns: await cursor.execute("ALTER TABLE guild_settings ADD COLUMN giveaway_youtube_channel_id TEXT")
 
     await conn.commit()
     log.info("Database tables initialized/updated successfully.")
@@ -763,3 +786,91 @@ async def get_all_pending_tier_requests(guild_id: int):
         """, (guild_id,))
         rows = await cursor.fetchall()
         return [{'user_id': r[0], 'next_tier': r[1], 'token': r[2], 'message_id': r[3]} for r in rows]
+
+async def create_giveaway(guild_id: int, name: str, description: str) -> int:
+    """Creates a new giveaway and returns its ID."""
+    conn = await get_db_connection()
+    async with conn.cursor() as cursor:
+        await cursor.execute(
+            "INSERT INTO giveaways (guild_id, name, description) VALUES (?, ?, ?)",
+            (guild_id, name, description)
+        )
+        await conn.commit()
+        return cursor.lastrowid
+
+async def update_giveaway_message_id(guild_id: int, giveaway_id: int, message_id: int):
+    """Updates the message ID for a giveaway."""
+    conn = await get_db_connection()
+    await conn.execute("UPDATE giveaways SET message_id = ? WHERE guild_id = ? AND id = ?", (message_id, guild_id, giveaway_id))
+    await conn.commit()
+
+async def get_active_giveaway(guild_id: int):
+    """Gets the currently active giveaway for a guild."""
+    conn = await get_db_connection()
+    async with conn.cursor() as cursor:
+        await cursor.execute("SELECT * FROM giveaways WHERE guild_id = ? AND is_active = 1", (guild_id,))
+        row = await cursor.fetchone()
+        if not row: return None
+        columns = [description[0] for description in cursor.description]
+        return dict(zip(columns, row))
+
+async def get_giveaway(guild_id: int, giveaway_id: int):
+    """Gets a specific giveaway by ID."""
+    conn = await get_db_connection()
+    async with conn.cursor() as cursor:
+        await cursor.execute("SELECT * FROM giveaways WHERE guild_id = ? AND id = ?", (guild_id, giveaway_id))
+        row = await cursor.fetchone()
+        if not row: return None
+        columns = [description[0] for description in cursor.description]
+        return dict(zip(columns, row))
+
+
+async def end_giveaway(guild_id: int, giveaway_id: int, winner_id: int | None):
+    """Ends a giveaway and sets the winner."""
+    conn = await get_db_connection()
+    await conn.execute(
+        "UPDATE giveaways SET is_active = 0, end_time = CURRENT_TIMESTAMP, winner_id = ? WHERE guild_id = ? AND id = ?",
+        (winner_id, guild_id, giveaway_id)
+    )
+    await conn.commit()
+
+async def add_giveaway_entrant(guild_id: int, giveaway_id: int, user_id: int) -> bool:
+    """Adds a user to the giveaway entrants. Returns False if they already entered."""
+    conn = await get_db_connection()
+    try:
+        await conn.execute(
+            "INSERT INTO giveaway_entrants (guild_id, giveaway_id, user_id) VALUES (?, ?, ?)",
+            (guild_id, giveaway_id, user_id)
+        )
+        await conn.commit()
+        return True
+    except aiosqlite.IntegrityError:
+        return False # User has already entered
+
+async def get_giveaway_entrants(guild_id: int, giveaway_id: int) -> list[int]:
+    """Gets a list of user IDs who have entered a giveaway."""
+    conn = await get_db_connection()
+    async with conn.cursor() as cursor:
+        await cursor.execute("SELECT user_id FROM giveaway_entrants WHERE guild_id = ? AND giveaway_id = ?", (guild_id, giveaway_id))
+        rows = await cursor.fetchall()
+        return [row[0] for row in rows]
+
+async def has_user_submitted_since(guild_id: int, user_id: int, timestamp: str) -> bool:
+    """Checks if a user has submitted a track since a given timestamp."""
+    conn = await get_db_connection()
+    async with conn.cursor() as cursor:
+        await cursor.execute(
+            "SELECT 1 FROM music_submissions WHERE guild_id = ? AND user_id = ? AND submitted_at > ?",
+            (guild_id, user_id, timestamp)
+        )
+        return await cursor.fetchone() is not None
+
+async def has_verified_google_account(guild_id: int, user_id: int) -> bool:
+    """Checks if a user has a verified Google account."""
+    conn = await get_db_connection()
+    async with conn.cursor() as cursor:
+        await cursor.execute(
+            "SELECT 1 FROM verification_links WHERE guild_id = ? AND user_id = ? AND status = 'verified' AND verified_account IS NOT NULL",
+            (guild_id, user_id)
+        )
+        return await cursor.fetchone() is not None

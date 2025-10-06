@@ -523,6 +523,21 @@ class TierRequirementModal(discord.ui.Modal, title="Set Tier Requirements"):
         await interaction.response.send_message(f"✅ Requirements to get into Tier {tier} updated.", ephemeral=True)
         await self.parent_view.refresh_and_show(interaction, edit_original=True)
 
+class GiveawaySettingsModal(discord.ui.Modal, title="Giveaway Settings"):
+    def __init__(self, parent_view: "SettingsMainView"):
+        super().__init__()
+        self.parent_view = parent_view
+        self.youtube_channel_id = discord.ui.TextInput(
+            label="YouTube Channel ID for Giveaways",
+            placeholder="e.g., UC-lHJZR3Gqxm24_Vd_AJ5Yw",
+            required=False
+        )
+        self.add_item(self.youtube_channel_id)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await database.update_setting(interaction.guild.id, 'giveaway_youtube_channel_id', self.youtube_channel_id.value)
+        await interaction.response.send_message("✅ Giveaway settings updated.", ephemeral=True)
+
 class SettingsMainView(BaseSettingsView):
     def __init__(self, bot: commands.Bot):
         super().__init__(bot)
@@ -599,6 +614,10 @@ class SettingsMainView(BaseSettingsView):
         embed = await view.get_tiers_embed(interaction.guild)
         await interaction.response.edit_message(embed=embed, view=view)
         view.message = await interaction.original_response()
+
+    @discord.ui.button(label="Giveaway", style=discord.ButtonStyle.secondary, emoji="🎉", row=3)
+    async def giveaway_settings(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(GiveawaySettingsModal(self))
 
 class ShopCostModal(discord.ui.Modal):
     def __init__(self, parent_view: "ShopSettingsView", item_name: str, setting_key: str):

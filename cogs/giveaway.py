@@ -6,7 +6,7 @@ import database
 import config
 import utils
 import random
-from datetime import datetime, timezone
+from datetime import datetime
 
 log = logging.getLogger(__name__)
 
@@ -42,13 +42,21 @@ class GiveawayCog(commands.Cog, name="Giveaway"):
         giveaway = await database.get_giveaway(interaction.guild.id, giveaway_id)
         if not giveaway or not giveaway['is_active']:
             return await interaction.followup.send("This giveaway is no longer active.", ephemeral=True)
-
-        # Requirement 1: Check for at least one submission since the giveaway started
+        
         has_submitted = await database.has_user_submitted_since(interaction.guild.id, interaction.user.id, giveaway['start_time'])
         if not has_submitted:
             submission_channel_id = await database.get_setting(interaction.guild.id, 'submission_channel_id')
             submission_channel = self.bot.get_channel(submission_channel_id) if submission_channel_id else None
-            return await interaction.followup.send(f"You must submit a track to the regular submissions channel ({submission_channel.mention if submission_channel else '#submissions'}) after the giveaway has started to be eligible.", ephemeral=True)
+            start_time_dt = datetime.fromisoformat(giveaway['start_time'])
+            start_timestamp = int(start_time_dt.timestamp())
+            
+            error_message = (
+                f"You must submit a track to the submissions channel "
+                f"({submission_channel.mention if submission_channel else '#submissions'}) "
+                f"after the giveaway started to be eligible.\n\n"
+                f"**Giveaway started at:** <t:{start_timestamp}:F>"
+            )
+            return await interaction.followup.send(error_message, ephemeral=True)
 
         # Requirement 2: Check for YouTube subscription (This is a placeholder for the actual check)
         # You would need to implement the logic here using the YouTube API

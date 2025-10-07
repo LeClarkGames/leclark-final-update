@@ -142,11 +142,23 @@ class KOTHBattleView(discord.ui.View):
 
 class ReviewItemView(discord.ui.View):
     """View for a single track being reviewed in regular mode."""
-    def __init__(self, bot: commands.Bot, submission_id: int):
-        super().__init__(timeout=18000) # 5 hours
+    def __init__(self, bot: commands.Bot, submission_id: int, guild_id: int):
+        super().__init__(timeout=18000)
         self.bot = bot
         self.submission_id = submission_id
+        self.guild_id = guild_id
         self.cog = bot.get_cog("Submissions")
+
+    async def on_timeout(self):
+        """Called when the view's 5-hour timer expires."""
+        log.warning(f"Review for submission {self.submission_id} timed out.")
+        await database.update_submission_status(self.submission_id, "pending", None)
+        
+        guild = self.bot.get_guild(self.guild_id)
+        if guild:
+            log.info(f"Updating panels for guild {guild.id} after review timeout.")
+            await self.cog._update_panel_after_submission(guild)
+            await self.cog._broadcast_full_update(self.guild_id)
 
     @discord.ui.button(label="✔️ Mark as Reviewed", style=discord.ButtonStyle.success)
     async def mark_reviewed(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -226,7 +238,8 @@ class SubmissionViewOpen(SubmissionBaseView):
         await database.update_submission_status(sub_id, "reviewing", interaction.user.id)
         user = interaction.guild.get_member(user_id)
         embed = discord.Embed(title="🎵 Track for Review", description=f"Submitted by: {user.mention if user else 'N/A'}", color=config.BOT_CONFIG["EMBED_COLORS"]["INFO"])
-        await interaction.response.send_message(embed=embed, content=url, view=ReviewItemView(self.bot, sub_id))
+        view = ReviewItemView(self.bot, sub_id, interaction.guild.id)
+        await interaction.response.send_message(embed=embed, content=url, view=view)
 
     @discord.ui.button(label="⏹️ Stop Submissions", style=discord.ButtonStyle.danger, custom_id="sub_stop_regular")
     async def stop_submissions(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -647,6 +660,38 @@ class SubmissionsCog(commands.Cog, name="Submissions"):
 
         log.info(f"User {interaction.user.id} used a priority pass on submission {submission_id}.")
         await interaction.followup.send("✅ Success! Your Priority Pass has been used, and your track has been moved to the front of the queue.", ephemeral=True)
+
+    @app_commands.command(name="reset_stuck_review", description="Manually resets a track that is stuck in the 'reviewing' state.")
+    @utils.has_permission("admin")
+    async def reset_stuck_review(self, interaction: discord.Interaction):
+        """Manually finds and resets any submission stuck in 'reviewing' status."""
+        await interaction.response.defer(ephemeral=True)
+
+        conn = await database.get_db_connection()
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                "SELECT submission_id, user_id FROM music_submissions WHERE guild_id = ? AND status = 'reviewing' AND submission_type = 'regular' LIMIT 1",
+                (interaction.guild.id,)
+            )
+            stuck_submission = await cursor.fetchone()
+
+        if not stuck_submission:
+            return await interaction.followup.send("✅ No stuck submissions found in the regular queue.", ephemeral=True)
+
+        submission_id, user_id = stuck_submission
+        
+        await database.update_submission_status(submission_id, "pending", None)
+        
+        log.info(f"Admin {interaction.user.id} manually reset stuck submission {submission_id}.")
+
+        await self._update_panel_after_submission(interaction.guild)
+        await self._broadcast_full_update(interaction.guild.id)
+
+        user = interaction.guild.get_member(user_id)
+        await interaction.followup.send(
+            f"✅ Successfully reset the stuck submission from **{user.display_name if user else 'Unknown User'}**. It has been returned to the queue.",
+            ephemeral=True
+        )
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(SubmissionsCog(bot))
